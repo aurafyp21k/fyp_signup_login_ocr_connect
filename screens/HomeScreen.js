@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as SMS from 'expo-sms';
 import { 
   View, 
   Text, 
@@ -8,15 +9,33 @@ import {
   Alert, 
   useWindowDimensions,
   ActivityIndicator,
-  ScrollView
+  ScrollView,
+  Image
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import MapView, { Marker, Polyline } from 'react-native-maps';
-import { ref, onValue, get, push, set } from 'firebase/database';
+import { ref, onValue, get, push, set, remove } from 'firebase/database';
 import { signOut } from 'firebase/auth';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { auth, database } from '../firebase/config';
+
+// Calculate distance between two points in kilometers
+const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // Distance in km
+};
+
+const deg2rad = (deg) => {
+  return deg * (Math.PI/180);
+};
 
 const AVAILABLE_SKILLS = [
   'JavaScript',
@@ -325,11 +344,13 @@ export default function HomeScreen({ navigation }) {
       // Get sender's email
       const userRef = ref(database, `users/${fromUserId}`);
       const userSnapshot = await get(userRef);
-      const userEmail = userSnapshot.val().email;
+      const userEmail = userSnapshot.val().email; 
+      const username = userSnapshot.val().fullName;
       
       await push(requestsRef, {
         from: fromUserId,
         fromEmail: userEmail,
+        fromusername: username,
         to: toUserId,
         status: 'pending',
         timestamp: Date.now()
@@ -341,22 +362,116 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
+  const handleDisconnect = async (connectionId, otherUserId) => {
+    try {
+      // Remove the connection from Firebase
+      const connectionRef = ref(database, `connections/${connectionId}`);
+      await remove(connectionRef);
+
+      // Remove the route
+      const newRoutes = { ...routes };
+      delete newRoutes[connectionId];
+      setRoutes(newRoutes);
+
+      // Update connections state
+      setConnections(connections.filter(conn => conn.id !== connectionId));
+
+      Alert.alert('Success', 'Successfully disconnected');
+    } catch (error) {
+      console.error('Error disconnecting:', error);
+      Alert.alert('Error', 'Failed to disconnect');
+    }
+  };
+
+  const sendLocationSMS = async (toPhoneNumber, otherUserName, otherUserData, distance) => {
+    try {
+      const isAvailable = await SMS.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Error', 'SMS is not available on this device');
+        return;
+      }
+
+      const currentUserRef = ref(database, `users/${auth.currentUser.uid}`);
+      const currentUserSnap = await get(currentUserRef);
+      const currentUserData = currentUserSnap.val();
+
+      // Create a more informative message
+      const message = `Travel Assist Connection!
+
+👋 ${currentUserData.fullName} (${currentUserData.phoneNumber}) wants to connect with you.
+
+📍 They are ${distance}km away from you.
+
+🗺️ Their location: https://www.google.com/maps?q=${otherUserData.location.latitude},${otherUserData.location.longitude}
+
+✨ Their skills: ${currentUserData.skills ? currentUserData.skills.join(', ') : 'None listed'}
+
+Open Travel Assist app to accept the connection!`;
+
+      const { result } = await SMS.sendSMSAsync(
+        [toPhoneNumber],
+        message
+      );
+
+      if (result === 'sent') {
+        console.log('SMS sent successfully');
+      }
+    } catch (error) {
+      console.error('Error sending SMS:', error);
+      Alert.alert('Error', 'Failed to send SMS');
+    }
+  };
+
   const handleRequestResponse = async (requestId, fromUserId, accept) => {
     try {
       const requestRef = ref(database, `connection_requests/${requestId}`);
+
+      // Remove the request first
+      await remove(requestRef);
+      setRequests(requests.filter(req => req.id !== requestId));
+
       if (accept) {
+        // Get both users' data
+        const [fromUserSnap, currentUserSnap] = await Promise.all([
+          get(ref(database, `users/${fromUserId}`)),
+          get(ref(database, `users/${auth.currentUser.uid}`))
+        ]);
+
+        const fromUserData = fromUserSnap.val();
+        const currentUserData = currentUserSnap.val();
+
+        // Find requesting user in nearbyUsers to get their distance
+        const fromUserNearby = nearbyUsers.find(u => u.id === fromUserId);
+        if (!fromUserNearby) {
+          throw new Error('User not found in nearby users');
+        }
+
         // Create a new connection in the database
         const connectionsRef = ref(database, 'connections');
         await push(connectionsRef, {
           users: [auth.currentUser.uid, fromUserId],
           timestamp: Date.now()
         });
+
+        // Send SMS to both users with the same distance
+        await Promise.all([
+          // Send SMS to the user who sent the request
+          sendLocationSMS(
+            fromUserData.phoneNumber,
+            currentUserData.fullName,
+            currentUserData,
+            fromUserNearby.distance
+          ),
+          // Send SMS to the current user
+          sendLocationSMS(
+            currentUserData.phoneNumber,
+            fromUserData.fullName,
+            fromUserData,
+            fromUserNearby.distance
+          )
+        ]);
       }
       
-      // Update request status
-      await set(requestRef, {
-        status: accept ? 'accepted' : 'rejected'
-      });
       Alert.alert('Success', `Request ${accept ? 'accepted' : 'rejected'}`);
     } catch (error) {
       console.error("Error handling request:", error);
@@ -396,7 +511,7 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
         {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
         
-        <Text style={styles.title}>Welcome!</Text>
+        <Text style={styles.title}>Welcome </Text>
         
         {location ? (
           <>
@@ -423,20 +538,34 @@ export default function HomeScreen({ navigation }) {
                     longitude: location.longitude,
                   }}
                   title="Your Location"
-                  pinColor="blue"
-                />
-                {nearbyUsers.map((user) => (
-                  <Marker
-                    key={user.id}
-                    coordinate={{
-                      latitude: user.location.latitude,
-                      longitude: user.location.longitude,
-                    }}
-                    title={user.email}
-                    description={`${user.distance} km away`}
-                    pinColor={connections.some(conn => conn.users.includes(user.id)) ? 'green' : 'red'}
+                >
+                  <Image
+                    source={require('../assets/marker.png')}
+                    style={{ width: 40, height: 40 }}
                   />
-                ))}
+                </Marker>
+                {nearbyUsers
+                  .filter(user => !selectedSkill || (user.skills && user.skills.includes(selectedSkill)))
+                  .map((user) => (
+                    <Marker
+                      key={user.id}
+                      coordinate={{
+                        latitude: user.location.latitude,
+                        longitude: user.location.longitude,
+                      }}
+                      title={user.email}
+                      description={`${user.distance} km away${user.skills ? ` • Skills: ${user.skills.join(', ')}` : ''}`}
+                    >
+                      <Image
+                        source={require('../assets/marker.png')}
+                        style={{ 
+                          width: 40, 
+                          height: 40,
+                          tintColor: connections.some(conn => conn.users.includes(user.id)) ? '#4CAF50' : '#FF4B4B'
+                        }}
+                      />
+                    </Marker>
+                  ))}
                 
                 {/* Draw walking routes only for connected users */}
                 {connections.map(connection => {
@@ -528,14 +657,28 @@ export default function HomeScreen({ navigation }) {
                       </View>
                     </View>
 
-                    <TouchableOpacity
-                      style={[styles.connectButton, isUserConnected(item.id) && styles.connectedButton]}
-                      onPress={() => sendConnectionRequest(item.id)}
-                    >
-                      <Text style={styles.buttonText}>
-                        {isUserConnected(item.id) ? 'Connected' : 'Connect'}
-                      </Text>
-                    </TouchableOpacity>
+                    {isUserConnected(item.id) ? (
+                      <TouchableOpacity
+                        style={[styles.connectButton, styles.disconnectButton]}
+                        onPress={() => {
+                          const connection = connections.find(conn => 
+                            conn.users.includes(item.id) && conn.users.includes(auth.currentUser.uid)
+                          );
+                          if (connection) {
+                            handleDisconnect(connection.id, item.id);
+                          }
+                        }}
+                      >
+                        <Text style={styles.buttonText}>Disconnect</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.connectButton}
+                        onPress={() => sendConnectionRequest(item.id)}
+                      >
+                        <Text style={styles.buttonText}>Connect</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))
               ) : (
@@ -548,7 +691,7 @@ export default function HomeScreen({ navigation }) {
               {requests.length > 0 ? (
                 requests.map((item) => (
                   <View key={item.id} style={styles.requestItem}>
-                    <Text>From: {item.from}</Text>
+                    <Text>From: {item.fromusername}</Text>
                     <View style={styles.requestButtons}>
                       <TouchableOpacity
                         style={[styles.responseButton, styles.acceptButton]}
@@ -664,8 +807,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignSelf: 'flex-end',
   },
-  connectedButton: {
-    backgroundColor: '#4CAF50',
+  disconnectButton: {
+    backgroundColor: '#ff3b30',
   },
   buttonText: {
     color: '#fff',
@@ -760,8 +903,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     padding: 15,
     borderRadius: 10,
-    margin: 10,
+    margin: 15,
     alignItems: 'center',
+    marginTop: 50,
+    marginBlockEnd:-25,
   },
   connectingButton: {
     backgroundColor: '#888',
