@@ -10,7 +10,9 @@ import {
   useWindowDimensions,
   ActivityIndicator,
   ScrollView,
-  Image
+  Image,
+  Modal,
+  TextInput
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import MapView, { Marker, Polyline } from 'react-native-maps';
@@ -19,6 +21,7 @@ import { signOut } from 'firebase/auth';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { auth, database } from '../firebase/config';
+import { Ionicons } from '@expo/vector-icons';
 
 // Calculate distance between two points in kilometers
 const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
@@ -37,22 +40,31 @@ const deg2rad = (deg) => {
   return deg * (Math.PI/180);
 };
 
-const AVAILABLE_SKILLS = [
-  'JavaScript',
-  'Python',
-  'Java',
-  'React Native',
-  'Node.js',
-  'Data Science',
-  'Machine Learning',
-  'UI/UX Design',
-  'Project Management',
-  'Digital Marketing',
-  'Content Writing',
-  'Mobile Development',
-  'Web Development',
-  'Cybersecurity'
+const CAR_SKILLS = [
+  'Tire Change', 'Jump Start', 'Battery Check', 'Coolant Refill', 'Brake Handling',
+  'Engine Reset', 'Fuel Leak', 'Tire Inflate', 'Light Replace', 'Car Unlock',
+  'Gear Shift', 'Clutch Fix', 'Smoke Diagnosis', 'Power Steering', 'Oil Check',
+  'Fuse Replace', 'Wiper Fix', 'AC Repair', 'Window Fix', 'Fluid Top-up',
+  'Pedal Release', 'Noise Check', 'Vibration Fix', 'Alignment Check', 'Jack Use',
+  'Horn Repair', 'Headlight Align', 'Mirror Replace', 'Sunroof Fix', 'Lock Lubricate',
+  'Seatbelt Fix', 'Muffler Secure', 'Bumper Repair', 'Radiator Seal', 'Belt Check',
+  'Hubcap Secure', 'Gas Cap', 'Speedometer Fix', 'Alternator Check', 'Tire Balance',
+  'Car Stall', 'Heater Repair', 'Dashboard Check', 'Transmission Fix', 'Car Tow',
+  'Exhaust Repair', 'Ignition Fix', 'Switch Replace'
 ];
+
+const FIRST_AID_SKILLS = [
+  'Wound Clean', 'Burn Treat', 'Nosebleed Stop', 'Sting Care', 'Ankle Wrap',
+  'Choking Help', 'CPR Perform', 'Stroke Detect', 'Shock Treat', 'Allergy Assist',
+  'Poison Handle', 'Cut Dress', 'Fracture Support', 'Bleeding Control', 'Seizure Aid',
+  'Sunburn Soothe', 'Bite Treat', 'Blister Cover', 'Panic Calm', 'Faint Recover',
+  'Heat Cool', 'Cold Warm', 'Lice Remove', 'Eye Rinse', 'Tooth Save',
+  'Burn Cool', 'Insect Bite', 'Spider Bite', 'Snake Bite', 'Scorpion Sting',
+  'Head Injury', 'Joint Immobilize', 'Concussion Watch', 'Tetanus Prevent', 'Splinter Remove',
+  'Asthma Help', 'Diabetic Assist', 'Frostbite Care', 'Ear Blockage', 'Vomit Control'
+];
+
+const AVAILABLE_SKILLS = [...CAR_SKILLS, ...FIRST_AID_SKILLS];
 
 export default function HomeScreen({ navigation }) {
   const { width } = useWindowDimensions();
@@ -65,6 +77,14 @@ export default function HomeScreen({ navigation }) {
   const [selectedSkill, setSelectedSkill] = useState('');
   const [errorMsg, setErrorMsg] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [skillCategory, setSkillCategory] = useState('all'); // 'all', 'car', 'firstAid'
+  const [showSkillModal, setShowSkillModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredSkills, setFilteredSkills] = useState([]);
+  const [userInfo, setUserInfo] = useState({ fullName: '', phoneNumber: '' });
+  const [mapRef, setMapRef] = useState(null);
+  const [showUpdateSkillsModal, setShowUpdateSkillsModal] = useState(false);
+  const [selectedUserSkills, setSelectedUserSkills] = useState([]);
 
   // Request location permission
   useEffect(() => {
@@ -217,8 +237,17 @@ export default function HomeScreen({ navigation }) {
     const userRef = ref(database, `users/${userId}`);
     const unsubscribe = onValue(userRef, (snapshot) => {
       const data = snapshot.val();
-      if (data?.location) {
-        setLocation(data.location);
+      if (data) {
+        // Get name from CNIC data
+        const name = data.cnic?.name || '';
+        setUserInfo({
+          fullName: name,
+          phoneNumber: data.phoneNumber || '',
+          skills: data.skills || []
+        });
+        if (data.location) {
+          setLocation(data.location);
+        }
       }
     });
 
@@ -252,6 +281,21 @@ export default function HomeScreen({ navigation }) {
       requestsUnsubscribe();
     };
   }, [navigation]);
+
+  // Update filtered skills when search query or category changes
+  useEffect(() => {
+    const skills = skillCategory === 'all' ? AVAILABLE_SKILLS :
+                  skillCategory === 'car' ? CAR_SKILLS : FIRST_AID_SKILLS;
+    
+    if (searchQuery.trim() === '') {
+      setFilteredSkills(skills);
+    } else {
+      const query = searchQuery.toLowerCase();
+      setFilteredSkills(skills.filter(skill => 
+        skill.toLowerCase().includes(query)
+      ));
+    }
+  }, [searchQuery, skillCategory]);
 
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371;
@@ -302,15 +346,15 @@ export default function HomeScreen({ navigation }) {
             userData.location.longitude
           );
           
-          // Only filter by distance initially
           if (distance <= 3) {
             const userSkills = userData.skills || [];
             const user = {
               id: userId,
               email: userData.email,
+              fullName: userData.cnic?.name || 'Unknown User',
               location: userData.location,
               distance: distance.toFixed(2),
-              skills: userData.skills || [] // Include skills in user data
+              skills: userData.skills || []
             };
             users.push(user);
           }
@@ -341,24 +385,35 @@ export default function HomeScreen({ navigation }) {
       const fromUserId = auth.currentUser.uid;
       const requestsRef = ref(database, 'connection_requests');
       
-      // Get sender's email
+      // Get sender's data
       const userRef = ref(database, `users/${fromUserId}`);
       const userSnapshot = await get(userRef);
-      const userEmail = userSnapshot.val().email; 
-      const username = userSnapshot.val().fullName;
+      const userData = userSnapshot.val();
       
-      await push(requestsRef, {
+      if (!userData) {
+        throw new Error('User data not found');
+      }
+
+      // Create request data with proper error handling
+      const requestData = {
         from: fromUserId,
-        fromEmail: userEmail,
-        fromusername: username,
+        fromEmail: userData.email || '',
+        fromusername: userData.cnic?.name || 'Unknown User', // Get name from CNIC data
         to: toUserId,
         status: 'pending',
         timestamp: Date.now()
-      });
+      };
+
+      // Validate request data before sending
+      if (!requestData.from || !requestData.to) {
+        throw new Error('Invalid request data');
+      }
+
+      await push(requestsRef, requestData);
       Alert.alert('Success', 'Connection request sent!');
     } catch (error) {
       console.error("Error sending request:", error);
-      Alert.alert('Error', 'Failed to send connection request');
+      Alert.alert('Error', 'Failed to send connection request. Please try again.');
     }
   };
 
@@ -398,7 +453,7 @@ export default function HomeScreen({ navigation }) {
       // Create a more informative message
       const message = `Travel Assist Connection!
 
-👋 ${currentUserData.fullName} (${currentUserData.phoneNumber}) wants to connect with you.
+ ${currentUserData.cnic?.name || 'Unknown User'} (${currentUserData.phoneNumber}) wants to connect with you.
 
 📍 They are ${distance}km away from you.
 
@@ -406,7 +461,7 @@ export default function HomeScreen({ navigation }) {
 
 ✨ Their skills: ${currentUserData.skills ? currentUserData.skills.join(', ') : 'None listed'}
 
-Open Travel Assist app to accept the connection!`;
+Open Travel Assist app to see their live location!`;
 
       const { result } = await SMS.sendSMSAsync(
         [toPhoneNumber],
@@ -489,6 +544,252 @@ Open Travel Assist app to accept the connection!`;
     }
   };
 
+  const renderSkillModal = () => (
+    <Modal
+      visible={showSkillModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowSkillModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Skill</Text>
+            <TouchableOpacity onPress={() => setShowSkillModal(false)}>
+              <Ionicons name="close" size={24} color="#000" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.categoryButtons}>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'all' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('all')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'all' && styles.activeCategoryButtonText]}>
+                All Skills
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'car' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('car')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'car' && styles.activeCategoryButtonText]}>
+                Car Skills
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'firstAid' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('firstAid')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'firstAid' && styles.activeCategoryButtonText]}>
+                First Aid Skills
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search skills..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#999"
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <ScrollView style={styles.skillsList}>
+            {filteredSkills.map((skill) => (
+              <TouchableOpacity
+                key={skill}
+                style={[styles.skillItem, selectedSkill === skill && styles.selectedSkillItem]}
+                onPress={() => {
+                  setSelectedSkill(skill);
+                  setShowSkillModal(false);
+                }}
+              >
+                <Text style={[styles.skillText, selectedSkill === skill && styles.selectedSkillText]}>
+                  {skill}
+                </Text>
+                {selectedSkill === skill && (
+                  <Ionicons name="checkmark" size={20} color="#fff" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderSkillFilter = () => (
+    <View style={styles.skillFilterContainer}>
+      <View style={styles.filterHeader}>
+        <Text style={styles.filterLabel}>Filter by Skill</Text>
+        {selectedSkill && (
+          <TouchableOpacity 
+            style={styles.clearFilterButton} 
+            onPress={() => {
+              setSelectedSkill('');
+              setSkillCategory('all');
+              setSearchQuery('');
+            }}
+          >
+            <Text style={styles.clearFilterText}>Clear</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      
+      <TouchableOpacity 
+        style={styles.dropdownButton}
+        onPress={() => setShowSkillModal(true)}
+      >
+        <Text style={[styles.dropdownButtonText, !selectedSkill && styles.placeholderText]}>
+          {selectedSkill || 'Select a skill'}
+        </Text>
+        <Ionicons name="chevron-down" size={20} color="#666" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const returnToCurrentLocation = () => {
+    if (mapRef && location) {
+      mapRef.animateToRegion({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.0922,
+        longitudeDelta: 0.0421,
+      }, 1000);
+    }
+  };
+
+  const updateUserSkills = async () => {
+    try {
+      const userId = auth.currentUser.uid;
+      const userRef = ref(database, `users/${userId}`);
+      
+      // Get current user data
+      const userSnapshot = await get(userRef);
+      const currentData = userSnapshot.val() || {};
+      
+      // Update only the skills while preserving other data
+      await set(userRef, {
+        ...currentData,
+        skills: selectedUserSkills
+      }, { merge: true });
+      
+      // Update local state
+      setUserInfo(prev => ({
+        ...prev,
+        skills: selectedUserSkills
+      }));
+      
+      Alert.alert('Success', 'Skills updated successfully!');
+      setShowUpdateSkillsModal(false);
+    } catch (error) {
+      console.error('Error updating skills:', error);
+      Alert.alert('Error', 'Failed to update skills');
+    }
+  };
+
+  const renderUpdateSkillsModal = () => (
+    <Modal
+      visible={showUpdateSkillsModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowUpdateSkillsModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Update Your Skills</Text>
+            <TouchableOpacity onPress={() => setShowUpdateSkillsModal(false)}>
+              <Ionicons name="close" size={24} color="#000" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.categoryButtons}>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'all' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('all')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'all' && styles.activeCategoryButtonText]}>
+                All Skills
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'car' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('car')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'car' && styles.activeCategoryButtonText]}>
+                Car Skills
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoryButton, skillCategory === 'firstAid' && styles.activeCategoryButton]}
+              onPress={() => setSkillCategory('firstAid')}
+            >
+              <Text style={[styles.categoryButtonText, skillCategory === 'firstAid' && styles.activeCategoryButtonText]}>
+                First Aid Skills
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search skills..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#999"
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <ScrollView style={styles.skillsList}>
+            {filteredSkills.map((skill) => (
+              <TouchableOpacity
+                key={skill}
+                style={[styles.skillItem, selectedUserSkills.includes(skill) && styles.selectedSkillItem]}
+                onPress={() => {
+                  setSelectedUserSkills(prev => 
+                    prev.includes(skill) 
+                      ? prev.filter(s => s !== skill)
+                      : [...prev, skill]
+                  );
+                }}
+              >
+                <Text style={[styles.skillText, selectedUserSkills.includes(skill) && styles.selectedSkillText]}>
+                  {skill}
+                </Text>
+                {selectedUserSkills.includes(skill) && (
+                  <Ionicons name="checkmark" size={20} color="#fff" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <TouchableOpacity 
+            style={styles.updateSkillsButton}
+            onPress={updateUserSkills}
+          >
+            <Text style={styles.updateSkillsButtonText}>Update Skills</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -500,6 +801,35 @@ Open Travel Assist app to accept the connection!`;
   return (
     <ScrollView>
       <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerInfo}>
+            <Text style={styles.title}>Welcome</Text>
+            {userInfo.fullName && (
+              <Text style={styles.userName}>{userInfo.fullName}</Text>
+            )}
+            {userInfo.phoneNumber && (
+              <Text style={styles.userPhone}>{userInfo.phoneNumber}</Text>
+            )}
+          </View>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity 
+              style={styles.updateSkillsButton}
+              onPress={() => {
+                setSelectedUserSkills(userInfo.skills || []);
+                setShowUpdateSkillsModal(true);
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
+              <Ionicons name="log-out-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <TouchableOpacity 
           style={[styles.connectAllButton, isConnecting && styles.connectingButton]} 
           onPress={connectToAllNearbyUsers}
@@ -510,8 +840,6 @@ Open Travel Assist app to accept the connection!`;
           </Text>
         </TouchableOpacity>
         {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
-        
-        <Text style={styles.title}>Welcome </Text>
         
         {location ? (
           <>
@@ -524,6 +852,7 @@ Open Travel Assist app to accept the connection!`;
   
             <View style={styles.mapContainer}>
               <MapView
+                ref={(ref) => setMapRef(ref)}
                 style={styles.map}
                 initialRegion={{
                   latitude: location.latitude,
@@ -553,7 +882,7 @@ Open Travel Assist app to accept the connection!`;
                         latitude: user.location.latitude,
                         longitude: user.location.longitude,
                       }}
-                      title={user.email}
+                      title={user.fullName}
                       description={`${user.distance} km away${user.skills ? ` • Skills: ${user.skills.join(', ')}` : ''}`}
                     >
                       <Image
@@ -581,54 +910,25 @@ Open Travel Assist app to accept the connection!`;
                   ) : null;
                 })}
               </MapView>
+              <TouchableOpacity 
+                style={styles.returnToLocationButton}
+                onPress={returnToCurrentLocation}
+              >
+                <Ionicons name="locate" size={24} color="#fff" />
+              </TouchableOpacity>
             </View>
   
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Nearby Users</Text>
-              <View style={styles.skillFilterContainer}>
-                <View style={styles.filterHeader}>
-                  <Text style={styles.filterLabel}>Filter by Skill</Text>
-                  {selectedSkill && (
-                    <TouchableOpacity 
-                      style={styles.clearFilterButton} 
-                      onPress={() => setSelectedSkill('')}
-                    >
-                      <Text style={styles.clearFilterText}>Clear</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false} 
-                  style={styles.skillsScroll}
-                  contentContainerStyle={styles.skillsScrollContent}
-                >
-                  {AVAILABLE_SKILLS.map((skill) => (
-                    <TouchableOpacity
-                      key={skill}
-                      style={[styles.skillFilterChip, selectedSkill === skill && styles.selectedFilterChip]}
-                      onPress={() => setSelectedSkill(skill)}
-                    >
-                      <Text 
-                        style={[styles.skillFilterChipText, selectedSkill === skill && styles.selectedFilterChipText]}
-                        numberOfLines={1}
-                      >
-                        {skill}
-                      </Text>
-                      {selectedSkill === skill && (
-                        <View style={styles.activeFilterDot} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+              {renderSkillFilter()}
+              {renderSkillModal()}
               {nearbyUsers.length > 0 ? (
                 nearbyUsers
                   .filter(user => !selectedSkill || (user.skills && user.skills.includes(selectedSkill)))
                   .map((item) => (
                   <View key={item.id} style={styles.userItem}>
                     <View style={styles.userInfo}>
-                      <Text style={styles.userEmail}>{item.email}</Text>
+                      <Text style={styles.userName}>{item.fullName}</Text>
                       <View style={styles.distanceContainer}>
                         <Text style={styles.distanceText}>{item.distance} km away</Text>
                       </View>
@@ -691,7 +991,7 @@ Open Travel Assist app to accept the connection!`;
               {requests.length > 0 ? (
                 requests.map((item) => (
                   <View key={item.id} style={styles.requestItem}>
-                    <Text>From: {item.fromusername}</Text>
+                    <Text style={styles.requestText}>From: {item.fromusername || 'Unknown User'}</Text>
                     <View style={styles.requestButtons}>
                       <TouchableOpacity
                         style={[styles.responseButton, styles.acceptButton]}
@@ -716,51 +1016,161 @@ Open Travel Assist app to accept the connection!`;
         ) : (
           <Text>Loading location data...</Text>
         )}
-        
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('Skills')}
-          >
-            <Text style={styles.actionButtonText}>My Skills</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.logoutButton]}
-            onPress={handleLogout}
-          >
-            <Text style={styles.actionButtonText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+        {renderUpdateSkillsModal()}
       </View>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  userItem: {
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 15,
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 10,
-    elevation: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  headerInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  userPhone: {
+    fontSize: 14,
+    color: '#666',
+  },
+  logoutButton: {
+    backgroundColor: '#ff3b30',
+    padding: 10,
+    borderRadius: 25,
+    width: 45,
+    height: 45,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ff3b30',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  connectAllButton: {
+    backgroundColor: '#4CAF50',
+    padding: 16,
+    borderRadius: 15,
+    margin: 20,
+    alignItems: 'center',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  connectingButton: {
+    backgroundColor: '#888',
+  },
+  connectAllButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  locationContainer: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 15,
+    margin: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    elevation: 2,
+  },
+  locationText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  mapContainer: {
+    height: 300,
+    borderRadius: 20,
+    margin: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  section: {
+    margin: 20,
+    padding: 20,
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 15,
+  },
+  userItem: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   userInfo: {
     flex: 1,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   userEmail: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: '#1a1a1a',
+    marginBottom: 6,
   },
   distanceContainer: {
-    marginBottom: 8,
+    marginBottom: 10,
   },
   distanceText: {
     fontSize: 14,
@@ -768,18 +1178,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   userSkillsContainer: {
-    marginTop: 8,
-  },
-  skillsScroll: {
-    flexGrow: 0,
-    marginBottom: 4,
+    marginTop: 10,
   },
   skillBadge: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginRight: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
@@ -790,90 +1196,91 @@ const styles = StyleSheet.create({
   skillBadgeText: {
     fontSize: 12,
     color: '#666',
+    fontWeight: '500',
   },
   selectedSkillBadgeText: {
     color: '#fff',
     fontWeight: '600',
   },
-  noSkillsText: {
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
-  },
   connectButton: {
     backgroundColor: '#2196F3',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     alignSelf: 'flex-end',
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   disconnectButton: {
     backgroundColor: '#ff3b30',
+    shadowColor: '#ff3b30',
   },
   buttonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
-  skillsText: {
-    color: '#666',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  skillFilterContainer: {
-    marginBottom: 15,
-    backgroundColor: '#f8f9fa',
-    padding: 12,
+  requestItem: {
+    backgroundColor: '#fff',
+    padding: 15,
+    marginVertical: 8,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
-  filterHeader: {
+  requestButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+  },
+  responseButton: {
+    padding: 10,
+    borderRadius: 12,
+    marginLeft: 12,
+    minWidth: 90,
     alignItems: 'center',
-    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  filterLabel: {
+  acceptButton: {
+    backgroundColor: '#4CD964',
+    shadowColor: '#4CD964',
+  },
+  rejectButton: {
+    backgroundColor: '#FF3B30',
+    shadowColor: '#FF3B30',
+  },
+  emptyText: {
+    textAlign: 'center',
+    fontStyle: 'italic',
+    color: '#666',
+    padding: 20,
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
   },
-  clearFilterButton: {
-    paddingHorizontal: 8,
-  },
-  clearFilterText: {
-    color: '#2196F3',
+  errorText: {
+    color: '#ff3b30',
+    textAlign: 'center',
+    margin: 10,
     fontSize: 14,
     fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
   },
   skillsScroll: {
     flexGrow: 0,
   },
   skillsScrollContent: {
     paddingRight: 12,
-  },
-  skillFilterChip: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  selectedFilterChip: {
-    backgroundColor: '#EBF7ED',
-    borderColor: '#4CAF50',
-  },
-  skillFilterChipText: {
-    fontSize: 14,
-    color: '#666',
-    marginRight: 4,
-  },
-  selectedFilterChipText: {
-    color: '#2E7D32',
-    fontWeight: '600',
   },
   activeFilterDot: {
     width: 6,
@@ -882,147 +1289,184 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     marginLeft: 4,
   },
-  buttonContainer: {
+  categoryButtons: {
+    flexDirection: 'row',
+    marginBottom: 15,
+    justifyContent: 'space-between',
+  },
+  categoryButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginHorizontal: 4,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  activeCategoryButton: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  categoryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeCategoryButtonText: {
+    color: '#fff',
+  },
+  skillFilterContainer: {
+    marginBottom: 20,
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  filterHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 10,
+    alignItems: 'center',
+    marginBottom: 15,
   },
-  actionButton: {
-    backgroundColor: '#2196F3',
-    padding: 10,
-    borderRadius: 5,
-    flex: 0.48,
+  filterLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
   },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
+  clearFilterButton: {
+    paddingHorizontal: 10,
   },
-  connectAllButton: {
-    backgroundColor: '#4CAF50',
+  clearFilterText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
     padding: 15,
     borderRadius: 10,
-    margin: 15,
-    alignItems: 'center',
-    marginTop: 50,
-    marginBlockEnd:-25,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  connectingButton: {
-    backgroundColor: '#888',
-  },
-  connectAllButtonText: {
-    color: 'white',
+  dropdownButtonText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    color: '#1a1a1a',
   },
-  container: {
+  placeholderText: {
+    color: '#999',
+  },
+  modalOverlay: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
-  loadingContainer: {
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 15,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  skillsList: {
+    maxHeight: 400,
+  },
+  skillItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  selectedSkillItem: {
+    backgroundColor: '#007AFF',
+  },
+  skillText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  selectedSkillText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  requestText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  returnToLocationButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: '#007AFF',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  errorText: {
-    color: 'red',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 40,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  locationContainer: {
-    backgroundColor: '#f5f5f5',
-    padding: 20,
-    borderRadius: 10,
-    marginVertical: 10,
-  },
-  locationText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  mapContainer: {
-    height: 300,
-    overflow: 'hidden',
-    borderRadius: 10,
-    marginVertical: 10,
-  },
-  map: {
-    width: '100%',
-    height: '100%',
-  },
-  section: {
-    marginVertical: 10,
-    padding: 10,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  userItem: {
+  headerButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
+  },
+  updateSkillsButton: {
+    backgroundColor: '#4CAF50',
     padding: 10,
-    backgroundColor: '#fff',
-    marginVertical: 5,
-    borderRadius: 5,
-  },
-  connectButton: {
-    backgroundColor: '#007AFF',
-    padding: 8,
-    borderRadius: 5,
-  },
-  requestItem: {
-    backgroundColor: '#fff',
-    padding: 10,
-    marginVertical: 5,
-    borderRadius: 5,
-  },
-  requestButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 5,
-  },
-  responseButton: {
-    padding: 8,
-    borderRadius: 5,
-    marginLeft: 10,
-    minWidth: 80,
+    borderRadius: 25,
+    width: 45,
+    height: 45,
+    justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  acceptButton: {
-    backgroundColor: '#4CD964',
-  },
-  rejectButton: {
-    backgroundColor: '#FF3B30',
-  },
-  emptyText: {
-    textAlign: 'center',
-    fontStyle: 'italic',
-    color: '#666',
-    padding: 10,
-  },
-  logoutButton: {
-    backgroundColor: '#ff3b30',
-    padding: 15,
-    borderRadius: 5,
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  buttonText: {
+  updateSkillsButtonText: {
     color: '#fff',
-    textAlign: 'center',
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

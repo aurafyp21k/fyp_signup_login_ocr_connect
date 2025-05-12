@@ -6,6 +6,7 @@ import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import HomeScreen from './screens/HomeScreen';
 import SkillsScreen from './screens/SkillsScreen';
+import CNICScannerScreen from './screens/CNICScannerScreen';
 import { auth } from './firebase/config';
 
 const Stack = createNativeStackNavigator();
@@ -62,6 +63,20 @@ export default function App() {
             title: 'My Skills',
             headerStyle: {
               backgroundColor: '#4CAF50',
+            },
+            headerTintColor: '#fff',
+            headerTitleStyle: {
+              fontWeight: 'bold',
+            },
+          }}
+        />
+        <Stack.Screen 
+          name="CNICScanner" 
+          component={CNICScannerScreen} 
+          options={{ 
+            title: 'CNIC Scanner',
+            headerStyle: {
+              backgroundColor: '#007AFF',
             },
             headerTintColor: '#fff',
             headerTitleStyle: {

@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { auth, database } from '../firebase/config';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { ref, set } from 'firebase/database';
 import * as Location from 'expo-location';
+import { getDatabase } from 'firebase/database';
 
-export default function SignupScreen({ navigation }) {
-  const [fullName, setFullName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
+export default function SignupScreen({ navigation, route }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Handle returned data from CNICScannerScreen
+  useEffect(() => {
+    if (route.params?.previousData) {
+      const { email: prevEmail, password: prevPassword } = route.params.previousData;
+      if (prevEmail) setEmail(prevEmail);
+      if (prevPassword) setPassword(prevPassword);
+    }
+  }, [route.params?.previousData]);
 
   const requestLocationPermission = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
@@ -22,20 +31,8 @@ export default function SignupScreen({ navigation }) {
   };
 
   const validateInputs = () => {
-    if (!fullName.trim()) {
-      Alert.alert('Error', 'Please enter your full name');
-      return false;
-    }
     if (!email.trim()) {
       Alert.alert('Error', 'Please enter your email');
-      return false;
-    }
-    if (!phoneNumber.trim()) {
-      Alert.alert('Error', 'Please enter your phone number');
-      return false;
-    }
-    if (phoneNumber.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
       return false;
     }
     if (password.length < 6) {
@@ -57,56 +54,70 @@ export default function SignupScreen({ navigation }) {
     };
   };
 
-
   const handleSignup = async () => {
     if (!validateInputs()) return;
 
+    setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
       // Get user's location
       const location = await getCurrentLocation();
-      if (location) {
-        // Store user data in Realtime Database
-        const userRef = ref(database, 'users/' + user.uid);
-        await set(userRef, {
-          email: user.email,
-          fullName: fullName,
-          phoneNumber: phoneNumber,
-          location: location,
-          createdAt: new Date().toISOString(),
-          skills: [],
-        });
+      if (!location) {
+        Alert.alert('Error', 'Failed to get location. Please ensure location services are enabled.');
+        return;
       }
 
+      // Store user data in Realtime Database
+      const userRef = ref(database, 'users/' + user.uid);
+      await set(userRef, {
+        email: user.email,
+        location: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          timestamp: location.timestamp
+        },
+        createdAt: new Date().toISOString(),
+        skills: [],
+        cnicVerified: false
+      });
+
       console.log('User created:', user.uid);
-      navigation.replace('Home');
+      // Pass the signup data to CNICScannerScreen
+      navigation.reset({
+        index: 0,
+        routes: [{ 
+          name: 'CNICScanner',
+          params: { 
+            signupData: {
+              email,
+              password
+            }
+          }
+        }],
+      });
     } catch (error) {
-      setError(error.message);
+      console.error('Signup error:', error);
+      let errorMessage = 'An error occurred during signup';
+      
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'Password should be at least 6 characters';
+      }
+      
+      Alert.alert('Signup Error', errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Sign Up</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Full Name"
-        value={fullName}
-        onChangeText={setFullName}
-        autoCapitalize="words"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Phone Number"
-        value={phoneNumber}
-        onChangeText={setPhoneNumber}
-        keyboardType="phone-pad"
-        maxLength={15}
-      />
 
       <TextInput
         style={styles.input}
@@ -124,15 +135,23 @@ export default function SignupScreen({ navigation }) {
         secureTextEntry
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TouchableOpacity style={styles.button} onPress={handleSignup}>
-        <Text style={styles.buttonText}>Sign Up</Text>
+      <TouchableOpacity 
+        style={[styles.button, loading && styles.buttonDisabled]} 
+        onPress={handleSignup}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="white" />
+        ) : (
+          <Text style={styles.buttonText}>Sign Up</Text>
+        )}
       </TouchableOpacity>
       <TouchableOpacity onPress={() => navigation.navigate('Login')}>
         <Text style={styles.link}>Already have an account? Login</Text>
       </TouchableOpacity>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -172,5 +191,8 @@ const styles = StyleSheet.create({
   link: {
     color: '#007AFF',
     textAlign: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
 });
