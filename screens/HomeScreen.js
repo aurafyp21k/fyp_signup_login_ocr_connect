@@ -790,6 +790,63 @@ Open Travel Assist app to see their live location!`;
     </Modal>
   );
 
+  const renderUserCard = (user) => {
+    const isConnected = isUserConnected(user.id);
+    const distance = location ? getDistanceFromLatLonInKm(
+      location.latitude,
+      location.longitude,
+      user.location.latitude,
+      user.location.longitude
+    ).toFixed(1) : 'N/A';
+
+    return (
+      <View style={styles.userCard}>
+        <View style={styles.userInfo}>
+          <Text style={styles.userName}>{user.fullName}</Text>
+          <Text style={styles.userDistance}>{distance} km away</Text>
+          <Text style={styles.userSkills}>
+            Skills: {user.skills ? user.skills.join(', ') : 'No skills listed'}
+          </Text>
+        </View>
+        <View style={styles.userActions}>
+          {isConnected ? (
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.chatButton]}
+                onPress={() => {
+                  // Sort user IDs to ensure consistent chat ID regardless of who initiates
+                  const sortedIds = [auth.currentUser.uid, user.id].sort();
+                  navigation.navigate('Chat', {
+                    chatId: `chat_${sortedIds[0]}_${sortedIds[1]}`,
+                    otherUserName: user.fullName
+                  });
+                }}
+              >
+                <Ionicons name="chatbubble-outline" size={24} color="#007AFF" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.disconnectButton]}
+                onPress={() => handleDisconnect(
+                  connections.find(c => c.users.includes(user.id))?.id,
+                  user.id
+                )}
+              >
+                <Ionicons name="close-circle-outline" size={24} color="#FF3B30" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.connectButton]}
+              onPress={() => sendConnectionRequest(user.id)}
+            >
+              <Ionicons name="add-circle-outline" size={24} color="#4CAF50" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -812,6 +869,12 @@ Open Travel Assist app to see their live location!`;
             )}
           </View>
           <View style={styles.headerButtons}>
+            <TouchableOpacity 
+              style={styles.chatbotButton}
+              onPress={() => navigation.navigate('Chatbot')}
+            >
+              <Ionicons name="chatbubble-outline" size={24} color="#fff" />
+            </TouchableOpacity>
             <TouchableOpacity 
               style={styles.updateSkillsButton}
               onPress={() => {
@@ -927,58 +990,7 @@ Open Travel Assist app to see their live location!`;
                   .filter(user => !selectedSkill || (user.skills && user.skills.includes(selectedSkill)))
                   .map((item) => (
                   <View key={item.id} style={styles.userItem}>
-                    <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{item.fullName}</Text>
-                      <View style={styles.distanceContainer}>
-                        <Text style={styles.distanceText}>{item.distance} km away</Text>
-                      </View>
-                      
-                      <View style={styles.userSkillsContainer}>
-                        {item.skills && item.skills.length > 0 ? (
-                          <ScrollView 
-                            horizontal 
-                            showsHorizontalScrollIndicator={false} 
-                            style={styles.skillsScroll}
-                          >
-                            {item.skills.map((skill, index) => (
-                              <View 
-                                key={index} 
-                                style={[styles.skillBadge, selectedSkill === skill && styles.selectedSkillBadge]}
-                              >
-                                <Text style={[styles.skillBadgeText, selectedSkill === skill && styles.selectedSkillBadgeText]}>
-                                  {skill}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                        ) : (
-                          <Text style={styles.noSkillsText}>No skills listed</Text>
-                        )}
-                      </View>
-                    </View>
-
-                    {isUserConnected(item.id) ? (
-                      <TouchableOpacity
-                        style={[styles.connectButton, styles.disconnectButton]}
-                        onPress={() => {
-                          const connection = connections.find(conn => 
-                            conn.users.includes(item.id) && conn.users.includes(auth.currentUser.uid)
-                          );
-                          if (connection) {
-                            handleDisconnect(connection.id, item.id);
-                          }
-                        }}
-                      >
-                        <Text style={styles.buttonText}>Disconnect</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.connectButton}
-                        onPress={() => sendConnectionRequest(item.id)}
-                      >
-                        <Text style={styles.buttonText}>Connect</Text>
-                      </TouchableOpacity>
-                    )}
+                    {renderUserCard(item)}
                   </View>
                 ))
               ) : (
@@ -1159,69 +1171,49 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
+  userCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   userInfo: {
     flex: 1,
-    marginBottom: 12,
   },
-  userEmail: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 6,
-  },
-  distanceContainer: {
-    marginBottom: 10,
-  },
-  distanceText: {
+  userDistance: {
     fontSize: 14,
     color: '#666',
-    fontWeight: '500',
+    marginBottom: 4,
   },
-  userSkillsContainer: {
-    marginTop: 10,
-  },
-  skillBadge: {
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  selectedSkillBadge: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#43A047',
-  },
-  skillBadgeText: {
-    fontSize: 12,
+  userSkills: {
+    fontSize: 14,
     color: '#666',
-    fontWeight: '500',
   },
-  selectedSkillBadgeText: {
-    color: '#fff',
-    fontWeight: '600',
+  userActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    padding: 8,
+    marginLeft: 8,
+    borderRadius: 20,
   },
   connectButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignSelf: 'flex-end',
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
+    backgroundColor: '#E8F5E9',
   },
   disconnectButton: {
-    backgroundColor: '#ff3b30',
-    shadowColor: '#ff3b30',
+    backgroundColor: '#FFEBEE',
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+  chatButton: {
+    backgroundColor: '#E3F2FD',
   },
   requestItem: {
     backgroundColor: '#fff',
@@ -1468,5 +1460,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  chatbotButton: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderRadius: 25,
+    width: 45,
+    height: 45,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

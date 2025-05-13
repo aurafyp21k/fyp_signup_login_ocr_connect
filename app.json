@@ -16,7 +16,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to the camera to scan ID cards",
-        "NSPhotoLibraryUsageDescription": "This app needs access to the photo library to upload ID card images"
+        "NSPhotoLibraryUsageDescription": "This app needs access to the photo library to upload ID card images",
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone for voice input functionality.",
+        "NSSpeechRecognitionUsageDescription": "This app needs access to speech recognition for voice input functionality."
       }
     },
     "plugins": [
@@ -31,6 +33,12 @@
         {
           "photosPermission": "The app accesses your photos to let you share them with your friends.",
           "cameraPermission": "The app accesses your camera to let you take photos."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
       ]
     ],
@@ -63,7 +71,9 @@
         "android.permission.VIBRATE",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "useNextNotificationsApi": true
     },

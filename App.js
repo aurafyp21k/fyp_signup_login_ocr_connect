@@ -7,6 +7,8 @@ import SignupScreen from './screens/SignupScreen';
 import HomeScreen from './screens/HomeScreen';
 import SkillsScreen from './screens/SkillsScreen';
 import CNICScannerScreen from './screens/CNICScannerScreen';
+import ChatbotScreen from './screens/ChatbotScreen';
+import ChatScreen from './screens/ChatScreen';
 import { auth } from './firebase/config';
 
 const Stack = createNativeStackNavigator();
@@ -75,6 +77,34 @@ export default function App() {
           component={CNICScannerScreen} 
           options={{ 
             title: 'CNIC Scanner',
+            headerStyle: {
+              backgroundColor: '#007AFF',
+            },
+            headerTintColor: '#fff',
+            headerTitleStyle: {
+              fontWeight: 'bold',
+            },
+          }}
+        />
+        <Stack.Screen 
+          name="Chatbot" 
+          component={ChatbotScreen} 
+          options={{ 
+            title: 'AI Assistant',
+            headerStyle: {
+              backgroundColor: '#007AFF',
+            },
+            headerTintColor: '#fff',
+            headerTitleStyle: {
+              fontWeight: 'bold',
+            },
+          }}
+        />
+        <Stack.Screen 
+          name="Chat" 
+          component={ChatScreen} 
+          options={{ 
+            title: 'Chat',
             headerStyle: {
               backgroundColor: '#007AFF',
             },
