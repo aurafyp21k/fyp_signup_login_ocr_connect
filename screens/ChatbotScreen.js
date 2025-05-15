@@ -1,13 +1,19 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Modal, Alert, ActivityIndicator, ImageBackground, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Modal, Alert } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as Speech from 'expo-speech';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Audio } from 'expo-av';
+import * as Permissions from 'expo-permissions';
+import React from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons, Ionicons, FontAwesome } from '@expo/vector-icons';
+import { Animated } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+
 // Initialize Gemini API
 const genAI = new GoogleGenerativeAI('AIzaSyCJeBrJ0liMxye8rEgScMfUqjv7mLEoRhQ');
 
@@ -21,139 +27,106 @@ const LANGUAGES = {
   'fr-FR': { name: 'Français', code: 'fr-FR' },
 };
 
+// HTML for WebView with Web Speech API
 const getHtmlContent = (language) => `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: gap: media:">
-  <style>
-    body { margin: 0; padding: 0; }
-  </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; padding: 0; }
+        #status { 
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <script>
-    let recognition = null;
-    let isInitialized = false;
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-    
-    function initSpeechRecognition() {
-      if (isInitialized) return;
-      
-      if (!('webkitSpeechRecognition' in window)) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'error',
-          error: 'Speech recognition not supported'
-        }));
-        return;
-      }
+    <div id="status">Listening...</div>
+    <script>
+        let recognition = null;
+        
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = '${language}';
 
-      try {
-        recognition = new webkitSpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = '${language}';
-        isInitialized = true;
+            recognition.onstart = () => {
+                document.getElementById('status').style.display = 'block';
+                window.ReactNativeWebView.postMessage('STARTED');
+            };
 
-        recognition.onstart = () => {
-          retryCount = 0;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'status',
-            status: 'started'
-          }));
-        };
+            recognition.onend = () => {
+                document.getElementById('status').style.display = 'none';
+                window.ReactNativeWebView.postMessage('STOP');
+            };
 
-        recognition.onresult = (event) => {
-          const result = event.results[event.results.length - 1];
-          const transcript = result[0].transcript;
-          
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'result',
-            text: transcript,
-            isFinal: result.isFinal
-          }));
-        };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                window.ReactNativeWebView.postMessage(transcript);
+            };
 
-        recognition.onerror = (event) => {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'error',
-            error: event.error
-          }));
+            recognition.onerror = (event) => {
+                window.ReactNativeWebView.postMessage('ERROR: ' + event.error);
+            };
 
-          if (event.error === 'no-speech' || event.error === 'audio-capture') {
-            if (retryCount < MAX_RETRIES) {
-              retryCount++;
-              setTimeout(() => {
-                try {
-                  recognition.stop();
-                  setTimeout(() => recognition.start(), 100);
-                } catch (e) {
-                  console.error('Error restarting recognition:', e);
-                }
-              }, 1000);
-            }
-          }
-        };
-
-        recognition.onend = () => {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'status',
-            status: 'ended'
-          }));
-        };
-
-      } catch (error) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'error',
-          error: 'Failed to initialize speech recognition: ' + error.message
-        }));
-      }
-    }
-
-    function startRecording() {
-      if (!recognition) {
-        initSpeechRecognition();
-      }
-      try {
-        recognition.start();
-      } catch (error) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'error',
-          error: 'Failed to start recording: ' + error.message
-        }));
-      }
-    }
-
-    function stopRecording() {
-      if (recognition) {
-        try {
-          recognition.stop();
-        } catch (error) {
-          console.error('Error stopping recording:', error);
+            // Start listening immediately
+            recognition.start();
+        } else {
+            window.ReactNativeWebView.postMessage('ERROR: Speech recognition not supported');
         }
-      }
-    }
-
-    // Initialize when the page loads
-    initSpeechRecognition();
-  </script>
+    </script>
 </body>
 </html>
 `;
 
-export default function App() {
+export default function ChatbotScreen() {
+  const navigation = useNavigation();
   const [text, setText] = useState('');
   const [messages, setMessages] = useState([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showVoiceInput, setShowVoiceInput] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('en-US');
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingError, setRecordingError] = useState(null);
   const speechTimeoutRef = useRef(null);
   const scrollViewRef = useRef(null);
   const webViewRef = useRef(null);
-  const lastResultsRef = useRef([]);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant microphone permission to use voice features.');
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  const startRecording = () => {
+    setShowVoiceInput(true);
+    setIsRecording(true);
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false);
+    setShowVoiceInput(false);
+  };
 
   const stopSpeaking = async () => {
     try {
@@ -168,121 +141,33 @@ export default function App() {
     }
   };
 
-  const startRecording = () => {
-    try {
-      setIsRecording(true);
-      setRecordingError(null);
-      lastResultsRef.current = [];
-      webViewRef.current?.injectJavaScript('startRecording();');
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      setRecordingError('Error starting recording');
-      Alert.alert('Failed to start recording', error.message);
-    }
-  };
-
-  const stopRecording = () => {
-    try {
-      setIsRecording(false);
-      webViewRef.current?.injectJavaScript('stopRecording();');
-    } catch (error) {
-      console.error('Error stopping recording:', error);
-      setRecordingError('Error stopping recording');
-      Alert.alert('Failed to stop recording', error.message);
-    }
-  };
-
   const handleWebViewMessage = (event) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      console.log('WebView message:', data);
-
-      switch (data.type) {
-        case 'result':
-          if (data.isFinal) {
-            lastResultsRef.current = [...lastResultsRef.current, data.text];
-            if (lastResultsRef.current.length > 3) {
-              lastResultsRef.current.shift();
-            }
-            setText(data.text);
-          }
-          break;
-        case 'error':
-          setRecordingError(data.error);
-          Alert.alert('Recording Error', data.error);
-          break;
-        case 'status':
-          if (data.status === 'ended') {
-            setIsRecording(false);
-            setTimeout(() => {
-              if (lastResultsRef.current.length > 0) {
-                const finalText = lastResultsRef.current.reduce((a, b) => 
-                  a.length > b.length ? a : b
-                );
-                if (finalText.trim()) {
-                  handleSendMessage(finalText);
-                  setText('');
-                }
-                lastResultsRef.current = [];
-              }
-              setShowVoiceInput(false);
-            }, 1000);
-          }
-          break;
-      }
-    } catch (error) {
-      console.error('Error handling WebView message:', error);
+    const message = event.nativeEvent.data;
+    if (message === 'STARTED') {
+      stopSpeaking();
+    } else if (message === 'STOP') {
+      setShowVoiceInput(false);
+      setIsRecording(false);
+    } else if (message.startsWith('ERROR:')) {
+      alert(message);
+      setShowVoiceInput(false);
+      setIsRecording(false);
+    } else {
+      setText('');
+      handleSendMessage(message);
+      setShowVoiceInput(false);
+      setIsRecording(false);
     }
   };
 
-  const handleSendMessage = async (message) => {
-    if (!message.trim()) return;
-
-    await stopSpeaking();
-
-    const userMessage = { text: message, sender: 'user', language: selectedLanguage };
-    setMessages(prev => [...prev, userMessage]);
-    scrollToBottom();
-
-    try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      
-      const recentMessages = messages.slice(-4);
-      const context = recentMessages.map(msg => 
-        `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}`
-      ).join('\n');
-      
-      const prompt = `Previous conversation context:\n${context}\n\nPlease provide a clear, concise, and accurate response to the following query in ${LANGUAGES[selectedLanguage].name}. Consider the previous conversation context when responding. Avoid using special characters, markdown, or formatting symbols in your response. Current query: ${message}`;
-      
-      const result = await model.generateContent(prompt);
-      const response = result.response.text();
-
-      const aiMessage = { text: response, sender: 'ai', language: selectedLanguage };
-      setMessages(prev => [...prev, aiMessage]);
-      scrollToBottom();
-
-      const cleanResponse = response
-        .replace(/\*/g, '')
-        .replace(/[\[\](){}]/g, '')
-        .replace(/[#@$%^&+=]/g, '')
-        .replace(/\n/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      await Speech.speak(cleanResponse, {
-        language: selectedLanguage,
-        pitch: 1.0,
-        rate: 0.9,
-        onStart: () => setIsSpeaking(true),
-        onDone: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
-      });
-    } catch (error) {
-      console.error('Error:', error);
-      const errorMessage = { text: 'Sorry, I encountered an error.', sender: 'ai', language: selectedLanguage };
-      setMessages(prev => [...prev, errorMessage]);
-      scrollToBottom();
-    }
+  const cleanTextForSpeech = (text) => {
+    return text
+      .replace(/\*/g, '')
+      .replace(/[\[\](){}]/g, '')
+      .replace(/[#@$%^&+=]/g, '')
+      .replace(/\n/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   const scrollToBottom = () => {
@@ -291,509 +176,509 @@ export default function App() {
     }
   };
 
+  const handleSendMessage = async (message) => {
+    if (!message.trim()) return;
+  
+    await stopSpeaking();
+  
+    const userMessage = { text: message, sender: 'user', language: selectedLanguage };
+    setMessages(prev => [...prev, userMessage]);
+    scrollToBottom();
+  
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  
+      // Last 4 messages for context
+      const recentMessages = messages.slice(-4);
+      const context = recentMessages.map(msg =>
+        `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}`
+      ).join('\n');
+  
+      // Categories with disclaimers & guidance
+      const categories = {
+        medical: {
+          keywords: ['pain', 'sick', 'disease', 'symptom', 'doctor', 'hospital', 'medicine', 'treatment', 'diagnosis', 'illness', 'health', 'medical'],
+          disclaimer: '⚠️ Disclaimer: This is not a substitute for professional medical advice. Please consult a healthcare provider for an accurate diagnosis and treatment.',
+          guidance: 'Provide basic information about the medical condition, its causes, common symptoms, and general treatments.'
+        },
+        mechanical: {
+          keywords: ['engine', 'repair', 'fix', 'broken', 'machine', 'mechanical', 'vehicle', 'car', 'motor', 'part', 'maintenance', 'technical', 'heated', 'overheating', 'temperature', 'coolant', 'oil', 'brake', 'transmission', 'battery', 'tire', 'wheel', 'suspension', 'exhaust', 'fuel', 'gas', 'petrol', 'diesel'],
+          disclaimer: '⚠️ Disclaimer: This is general mechanical advice. For complex repairs, consult a certified mechanic.',
+          guidance: 'Provide troubleshooting steps, common causes, safety checks, and preventive measures for the mechanical issue.'
+        }
+      };
+  
+      // Determine category
+      let category = 'general';
+      let disclaimer = '';
+      let guidance = '';
+  
+      for (const [cat, data] of Object.entries(categories)) {
+        if (data.keywords.some(keyword => message.toLowerCase().includes(keyword))) {
+          category = cat;
+          disclaimer = data.disclaimer;
+          guidance = data.guidance;
+          break;
+        }
+      }
+  
+      // Prepare prompt
+      const prompt = `
+  ${category !== 'general' ? guidance : ''}
+  ${category !== 'general' ? disclaimer : ''}
+  
+  Previous conversation context:
+  ${context}
+  
+  Please provide a clear, concise, and accurate response to the following user query in ${LANGUAGES[selectedLanguage].name}.
+  Avoid using special characters, markdown, or formatting symbols.
+  
+  User Query: ${message}
+      `.trim();
+  
+      // Generate AI response
+      const result = await model.generateContent(prompt);
+      const response = result.response.text();
+  
+      // Add AI response to chat
+      const aiMessage = { text: response, sender: 'ai', language: selectedLanguage };
+      setMessages(prev => [...prev, aiMessage]);
+      scrollToBottom();
+  
+      // Speak response
+      const cleanResponse = cleanTextForSpeech(response);
+      await Speech.speak(cleanResponse, {
+        language: selectedLanguage,
+        pitch: 1.0,
+        rate: 0.9,
+        onStart: () => setIsSpeaking(true),
+        onDone: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
+  
+    } catch (error) {
+      console.error('Error:', error);
+      const errorMessage = { text: 'Sorry, I encountered an error.', sender: 'ai', language: selectedLanguage };
+      setMessages(prev => [...prev, errorMessage]);
+      scrollToBottom();
+    }
+  };
+
+  // const handleSendMessage = async (message) => {
+  //   if (!message.trim()) return;
+
+  //   await stopSpeaking();
+
+  //   const userMessage = { text: message, sender: 'user', language: selectedLanguage };
+  //   setMessages(prev => [...prev, userMessage]);
+  //   scrollToBottom();
+
+  //   try {
+  //     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      
+  //     // Create a context from previous messages
+  //     const recentMessages = messages.slice(-4); // Get last 4 messages for context
+  //     const context = recentMessages.map(msg => 
+  //       `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}`
+  //     ).join('\n');
+      
+  //     // Define categories and their disclaimers
+  //     const categories = {
+  //       medical: {
+  //         keywords: ['pain', 'sick', 'disease', 'symptom', 'doctor', 'hospital', 'medicine', 'treatment', 'diagnosis', 'illness', 'health', 'medical'],
+  //         guidance: 'Please provide general information about the medical condition and any relevant symptoms. Include basic information about the condition, its causes, and common treatments.'
+  //       },
+  //       mechanical: {
+  //         keywords: ['engine', 'repair', 'fix', 'broken', 'machine', 'mechanical', 'vehicle', 'car', 'motor', 'part', 'maintenance', 'technical', 'heated', 'overheating', 'temperature', 'coolant', 'oil', 'brake', 'transmission', 'battery', 'tire', 'wheel', 'suspension', 'exhaust', 'fuel', 'gas', 'petrol', 'diesel'],
+  //         guidance: 'Please provide general troubleshooting steps and preventive measures for the issue. Include basic safety checks, common causes, and immediate actions that can be taken. Focus on steps that can help prevent further damage while waiting for professional help.'
+  //       }
+  //     };
+
+  //     // Check message category
+  //     let category = 'general';
+  //     // let disclaimer = '';
+  //     let guidance = '';
+      
+  //     for (const [cat, data] of Object.entries(categories)) {
+  //       if (data.keywords.some(keyword => message.toLowerCase().includes(keyword))) {
+  //         category = cat;
+  //         disclaimer = data.disclaimer;
+  //         guidance = data.guidance || '';
+  //         break;
+  //       }
+  //     }
+      
+  //     const prompt = category !== 'general'
+  //       ? `${guidance}\n\nPrevious conversation context:\n${context}\n\nPlease provide a clear, concise, and accurate response to the following query in ${LANGUAGES[selectedLanguage].name}. Consider the previous conversation context when responding. Avoid using special characters, markdown, or formatting symbols in your response. Current query: ${message}`
+  //       : `Previous conversation context:\n${context}\n\nPlease provide a clear, concise, and accurate response to the following query in ${LANGUAGES[selectedLanguage].name}. Consider the previous conversation context when responding. Avoid using special characters, markdown, or formatting symbols in your response. Current query: ${message}`;
+      
+  //     const result = await model.generateContent(prompt);
+  //     const response = result.response.text();
+
+  //     const aiMessage = { text: response, sender: 'ai', language: selectedLanguage };
+  //     setMessages(prev => [...prev, aiMessage]);
+  //     scrollToBottom();
+
+  //     const cleanResponse = cleanTextForSpeech(response);
+  //     await Speech.speak(cleanResponse, {
+  //       language: selectedLanguage,
+  //       pitch: 1.0,
+  //       rate: 0.9,
+  //       onStart: () => setIsSpeaking(true),
+  //       onDone: () => setIsSpeaking(false),
+  //       onError: () => setIsSpeaking(false),
+  //     });
+  //   } catch (error) {
+  //     console.error('Error:', error);
+  //     const errorMessage = { text: 'Sorry, I encountered an error.', sender: 'ai', language: selectedLanguage };
+  //     setMessages(prev => [...prev, errorMessage]);
+  //     scrollToBottom();
+  //   }
+  // };
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <LinearGradient
-        colors={['#1a237e', '#0d47a1']}
-        style={styles.background}
+        colors={['#4f46e5', '#7c3aed', '#2563eb']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
+        style={styles.container}
       >
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerContent}>
-              <Ionicons name="chatbubble-ellipses" size={28} color="#fff" />
-              <Text style={styles.headerTitle}>Gemini AI Assistant</Text>
-            </View>
-            <View style={styles.languageSelector}>
-              <MaterialIcons name="language" size={20} color="#fff" />
-              <Picker
-                selectedValue={selectedLanguage}
-                style={styles.picker}
-                dropdownIconColor="#fff"
-                onValueChange={(itemValue) => {
-                  setSelectedLanguage(itemValue);
-                  stopSpeaking();
-                }}
-              >
-                {Object.entries(LANGUAGES).map(([code, { name }]) => (
-                  <Picker.Item 
-                    key={code} 
-                    label={name} 
-                    value={code} 
-                    color={selectedLanguage === code ? '#fff' : '#333'}
-                  />
-                ))}
-              </Picker>
-            </View>
-          </View>
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.navigate('Home')}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>AI Assistant</Text>
+        </View>
 
-          {/* Chat Container */}
-          <View style={styles.mainContent}>
-            <ScrollView 
-              ref={scrollViewRef}
-              style={styles.chatContainer}
-              contentContainerStyle={styles.chatContentContainer}
-              onContentSizeChange={scrollToBottom}
-              onLayout={scrollToBottom}
-              showsVerticalScrollIndicator={false}
-            >
-              {messages.length === 0 ? (
-                <View style={styles.welcomeContainer}>
-                  <View style={styles.welcomeIconContainer}>
-                    <Ionicons name="chatbubbles" size={60} color="#fff" />
-                  </View>
-                  <Text style={styles.welcomeText}>How can I help you today?</Text>
-                  <Text style={styles.welcomeSubtext}>Ask me anything in your preferred language</Text>
-                </View>
-              ) : (
-                messages.map((message, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.messageBubble,
-                      message.sender === 'user' ? styles.userMessage : styles.aiMessage,
-                    ]}
-                  >
-                    <View style={styles.messageHeader}>
-                      <View style={styles.senderContainer}>
-                        {message.sender === 'user' ? (
-                          <Ionicons name="person-circle" size={20} color="#fff" />
-                        ) : (
-                          <Ionicons name="logo-android" size={20} color="#fff" />
-                        )}
-                        <Text style={styles.senderText}>
-                          {message.sender === 'user' ? 'You' : 'Gemini'}
-                        </Text>
-                      </View>
-                      <Text style={styles.languageIndicator}>
-                        {LANGUAGES[message.language].name}
-                      </Text>
-                    </View>
-                    <Text style={[
-                      styles.messageText,
-                      message.sender === 'user' ? styles.userMessageText : styles.aiMessageText,
-                      { writingDirection: message.language === 'ur-PK' ? 'rtl' : 'ltr' }
-                    ]}>
-                      {message.text}
-                    </Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-
-            {/* Input Area */}
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={[
-                  styles.input,
-                  { writingDirection: selectedLanguage === 'ur-PK' ? 'rtl' : 'ltr' }
-                ]}
-                value={text}
-                onChangeText={(newText) => {
-                  setText(newText);
-                  stopSpeaking();
-                }}
-                placeholder="Type a message..."
-                placeholderTextColor="rgba(255, 255, 255, 0.6)"
-                multiline
-              />
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.voiceButton]}
-                  onPress={() => {
-                    stopSpeaking();
-                    setShowVoiceInput(true);
-                    startRecording();
-                  }}
-                >
-                  <MaterialIcons 
-                    name={isSpeaking ? "volume-up" : "keyboard-voice"} 
-                    size={24} 
-                    color="#fff" 
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.sendButton]}
-                  onPress={() => {
-                    handleSendMessage(text);
-                    setText('');
-                  }}
-                  disabled={!text.trim()}
-                >
-                  <Ionicons name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-          {/* Voice Input Modal */}
-          <Modal
-            visible={showVoiceInput}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {
-              stopRecording();
-              setShowVoiceInput(false);
+        <Animated.View style={[styles.languageSelector, { opacity: fadeAnim }]}>
+          <Text style={styles.languageLabel}>Language:</Text>
+          <Picker
+            selectedValue={selectedLanguage}
+            style={styles.picker}
+            onValueChange={(itemValue) => {
+              setSelectedLanguage(itemValue);
+              stopSpeaking();
             }}
           >
-            <View style={styles.modalOverlay}>
-              <LinearGradient
-                colors={['rgba(26, 35, 126, 0.95)', 'rgba(13, 71, 161, 0.95)']}
-                style={styles.modalContainer}
-              >
-                <View style={styles.modalContent}>
-                  <View style={styles.recordingIndicator}>
-                    {isRecording ? (
-                      <>
-                        <View style={styles.recordingPulse}></View>
-                        <FontAwesome name="microphone" size={60} color="#fff" />
-                      </>
-                    ) : (
-                      <FontAwesome name="microphone-slash" size={60} color="#fff" />
-                    )}
-                  </View>
-                  <Text style={styles.modalText}>
-                    {isRecording ? 'Listening... Speak now' : 'Recording stopped'}
-                  </Text>
-                  {recordingError && (
-                    <Text style={styles.errorText}>{recordingError}</Text>
-                  )}
-                  <View style={styles.modalButtons}>
-                    {isRecording ? (
-                      <TouchableOpacity
-                        style={[styles.modalButton, styles.stopButton]}
-                        onPress={stopRecording}
-                      >
-                        <Text style={styles.modalButtonText}>Stop</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        style={[styles.modalButton, styles.startButton]}
-                        onPress={startRecording}
-                      >
-                        <Text style={styles.modalButtonText}>Start Again</Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      style={[styles.modalButton, styles.closeButton]}
-                      onPress={() => {
-                        stopRecording();
-                        setShowVoiceInput(false);
-                      }}
-                    >
-                      <Text style={styles.modalButtonText}>Close</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </LinearGradient>
-            </View>
-          </Modal>
+            {Object.entries(LANGUAGES).map(([code, { name }]) => (
+              <Picker.Item key={code} label={name} value={code} />
+            ))}
+          </Picker>
+        </Animated.View>
 
-          <WebView
-            ref={webViewRef}
-            source={{ html: getHtmlContent(selectedLanguage) }}
-            style={{ width: 0, height: 0 }}
-            onMessage={handleWebViewMessage}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            startInLoadingState={true}
-            scalesPageToFit={true}
-            originWhitelist={['*']}
-            mixedContentMode="always"
-            allowsInlineMediaPlayback={true}
-            mediaPlaybackRequiresUserAction={false}
-            allowsFullscreenVideo={true}
-            allowFileAccess={true}
-            allowUniversalAccessFromFileURLs={true}
-            allowFileAccessFromFileURLs={true}
-            androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
-            androidHardwareAccelerationDisabled={false}
-            onError={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('WebView error:', nativeEvent);
-              setRecordingError('WebView error: ' + nativeEvent.description);
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.chatContainer}
+          onContentSizeChange={scrollToBottom}
+          onLayout={scrollToBottom}
+          showsVerticalScrollIndicator={false}
+        >
+          {messages.map((message, index) => (
+            <Animated.View
+              key={index}
+              style={[
+                styles.messageBubble,
+                message.sender === 'user' ? styles.userMessage : styles.aiMessage,
+                { opacity: fadeAnim }
+              ]}
+            >
+              <Text style={[
+                styles.messageText,
+                message.sender === 'user' ? styles.userMessageText : styles.aiMessageText,
+                { writingDirection: message.language === 'ur-PK' ? 'rtl' : 'ltr' }
+              ]}>
+                {message.text}
+              </Text>
+            </Animated.View>
+          ))}
+        </ScrollView>
+
+        <Animated.View style={[styles.inputContainer, { opacity: fadeAnim }]}>
+          <TextInput
+            style={[
+              styles.input,
+              { writingDirection: selectedLanguage === 'ur-PK' ? 'rtl' : 'ltr' }
+            ]}
+            value={text}
+            onChangeText={(newText) => {
+              setText(newText);
+              stopSpeaking();
             }}
-            onLoadEnd={() => {
-              console.log('WebView loaded successfully');
-            }}
-            onLoadStart={() => {
-              console.log('WebView starting to load');
-            }}
+            placeholder="Type a message..."
+            placeholderTextColor="rgba(255, 255, 255, 0.6)"
+            multiline
           />
+          <TouchableOpacity
+            style={[styles.sendButton, text.trim() ? styles.sendButtonActive : {}]}
+            onPress={() => {
+              handleSendMessage(text);
+              setText('');
+            }}
+          >
+            <Text style={styles.sendButtonText}>Send</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.voiceButton, isRecording && styles.voiceButtonActive]}
+            onPress={isRecording ? stopRecording : startRecording}
+          >
+            <Text style={styles.voiceButtonText}>
+              {isRecording ? '⏹️' : '🎤'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
 
-          <StatusBar style="light" />
-        </View>
+        <Modal
+          visible={showVoiceInput}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {
+            stopSpeaking();
+            setShowVoiceInput(false);
+          }}
+        >
+          <View style={styles.modalContainer}>
+            <Animated.View style={[styles.modalContent, { opacity: fadeAnim }]}>
+              <Text style={styles.modalText}>Speak now...</Text>
+              <WebView
+                ref={webViewRef}
+                source={{ html: getHtmlContent(selectedLanguage) }}
+                onMessage={handleWebViewMessage}
+                style={styles.webview}
+              />
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  stopSpeaking();
+                  setShowVoiceInput(false);
+                }}
+              >
+                <Text style={styles.closeButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+        </Modal>
+
+        <StatusBar style="light" />
       </LinearGradient>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#1a237e',
-  },
-  background: {
-    flex: 1,
   },
   container: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
   },
   header: {
-    marginBottom: 20,
-  },
-  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    padding: 16,
+    paddingTop: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginLeft: 8,
+    fontWeight: '700',
+    color: '#ffffff',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   languageSelector: {
     flexDirection: 'row',
     alignItems: 'center',
+    padding: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  languageLabel: {
+    fontSize: 18,
+    marginRight: 10,
+    color: '#ffffff',
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   picker: {
-    height: 70,
-    width: 150,
-    color: '#fff',
-  },
-  mainContent: {
     flex: 1,
-    marginBottom: 16,
+    height: 50,
+    color: '#ffffff',
   },
   chatContainer: {
     flex: 1,
-    marginBottom: 12,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     padding: 16,
   },
-  chatContentContainer: {
-    paddingBottom: 16,
-  },
-  welcomeContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  welcomeIconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 20,
-    textAlign: 'center',
-  },
-  welcomeSubtext: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginTop: 8,
-    textAlign: 'center',
-  },
   messageBubble: {
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
-    maxWidth: '85%',
+    maxWidth: '80%',
+    padding: 16,
+    borderRadius: 24,
+    marginVertical: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#2196F3',
+    backgroundColor: '#4f46e5',
     borderBottomRightRadius: 4,
   },
   aiMessage: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     borderBottomLeftRadius: 4,
-  },
-  messageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  senderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  senderText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginLeft: 4,
-  },
-  userMessageText: {
-    color: '#fff',
-  },
-  aiMessageText: {
-    color: '#fff',
-  },
-  languageIndicator: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontStyle: 'italic',
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 22,
+    lineHeight: 24,
+  },
+  userMessageText: {
+    color: '#ffffff',
+  },
+  aiMessageText: {
+    color: '#ffffff',
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    padding: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 25,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 3,
+    elevation: 5,
   },
   input: {
     flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    color: '#fff',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginRight: 12,
+    maxHeight: 100,
+    color: '#ffffff',
     fontSize: 16,
-    paddingVertical: 8,
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  actionButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   sendButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: 'rgba(79, 70, 229, 0.5)',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    marginRight: 12,
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  sendButtonActive: {
+    backgroundColor: '#4f46e5',
+  },
+  sendButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   voiceButton: {
-    backgroundColor: '#FF5722',
-  },
-  modalOverlay: {
-    flex: 1,
+    backgroundColor: '#7c3aed',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  voiceButtonActive: {
+    backgroundColor: '#f43f77',
+    shadowColor: '#f43f77',
+  },
+  voiceButtonText: {
+    color: '#ffffff',
+    fontSize: 20,
   },
   modalContainer: {
-    width: '85%',
-    borderRadius: 25,
-    padding: 24,
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 24,
+    padding: 24,
+    width: '85%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  modalContent: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  recordingIndicator: {
-    position: 'relative',
-    marginBottom: 30,
-  },
-  recordingPulse: {
-    position: 'absolute',
-    top: -15,
-    left: -15,
-    right: -15,
-    bottom: -15,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    zIndex: -1,
-    animationKeyframes: {
-      '0%': { transform: [{ scale: 1 }], opacity: 1 },
-      '100%': { transform: [{ scale: 1.5 }], opacity: 0 },
-    },
-    animationDuration: '1500ms',
-    animationIterationCount: 'infinite',
+    shadowRadius: 6,
+    elevation: 8,
   },
   modalText: {
     fontSize: 20,
-    color: '#fff',
     marginBottom: 24,
-    textAlign: 'center',
-    fontWeight: '500',
+    color: '#ffffff',
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  errorText: {
-    color: '#ffeb3b',
-    marginBottom: 24,
-    textAlign: 'center',
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  modalButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 25,
-    marginHorizontal: 8,
-    minWidth: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  startButton: {
-    backgroundColor: '#4CAF50',
-  },
-  stopButton: {
-    backgroundColor: '#F44336',
+  webview: {
+    width: 1,
+    height: 1,
   },
   closeButton: {
-    backgroundColor: '#607D8B',
+    marginTop: 24,
+    padding: 12,
+    backgroundColor: '#f43f77',
+    borderRadius: 16,
+    shadowColor: '#f43f77',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  modalButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  closeButtonText: {
+    color: '#ffffff',
     fontSize: 16,
+    fontWeight: '600',
   },
 });

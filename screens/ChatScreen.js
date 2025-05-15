@@ -8,25 +8,104 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   Keyboard,
-  StatusBar,
   Image,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getDatabase, ref, onValue, push, serverTimestamp } from 'firebase/database';
 import { getAuth } from 'firebase/auth';
-import * as ImagePicker from 'expo-image-picker';
-import EmojiSelector, { Categories } from 'react-native-emoji-selector';
+import * as Notifications from 'expo-notifications';
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 const ChatScreen = ({ route, navigation }) => {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const flatListRef = useRef(null);
   const { chatId, otherUser } = route.params;
   const db = getDatabase();
   const auth = getAuth();
+  const notificationListener = useRef();
+  const responseListener = useRef();
+  const processedMessageIds = useRef(new Set());
+
+  // Request notification permissions
+  useEffect(() => {
+    (async () => {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        Alert.alert('Permission Required', 'Please enable notifications to receive chat messages');
+        return;
+      }
+
+      // Set up notification channels for Android
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('chat-messages', {
+          name: 'Chat Messages',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#FF231F7C',
+        });
+      }
+    })();
+  }, []);
+
+  // Set up notification listener
+  useEffect(() => {
+    const subscription = Notifications.addNotificationReceivedListener(notification => {
+      // Handle received notification
+      const { title, body } = notification.request.content;
+      // You can update UI or state here if needed
+    });
+
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
+      // Handle notification response (when user taps notification)
+      const { title, body } = response.notification.request.content;
+      // Navigate to chat or perform other actions
+    });
+
+    return () => {
+      subscription.remove();
+      responseSubscription.remove();
+    };
+  }, []);
+
+  // Function to send notification
+  const sendNotification = async (title, body) => {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          data: { 
+            type: 'chat_message',
+            chatId: chatId,
+            otherUser: otherUser
+          },
+        },
+        trigger: null, // null means show immediately
+      });
+    } catch (error) {
+      console.error('Error sending notification:', error);
+    }
+  };
 
   useEffect(() => {
     const messagesRef = ref(db, `chats/${chatId}/messages`);
@@ -39,54 +118,47 @@ const ChatScreen = ({ route, navigation }) => {
           ...child.val(),
         });
       });
-      setMessages(messagesList.sort((a, b) => a.timestamp - b.timestamp));
+      const sortedMessages = messagesList.sort((a, b) => a.timestamp - b.timestamp);
+      setMessages(sortedMessages);
+
+      // Check for new messages
+      if (sortedMessages.length > 0) {
+        const lastMessage = sortedMessages[sortedMessages.length - 1];
+        
+        // Only send notification if:
+        // 1. The message is from the other user
+        // 2. We haven't processed this message ID before
+        if (lastMessage.senderId !== auth.currentUser.uid && 
+            !processedMessageIds.current.has(lastMessage.id)) {
+          
+          // Add message ID to processed set
+          processedMessageIds.current.add(lastMessage.id);
+          
+          // Send notification for new message
+          Notifications.scheduleNotificationAsync({
+            content: {
+              title: otherUser?.name || 'New Message',
+              body: lastMessage.text,
+              sound: true,
+              priority: Notifications.AndroidNotificationPriority.HIGH,
+              data: { 
+                type: 'chat_message',
+                chatId: chatId,
+                otherUser: otherUser
+              },
+            },
+            trigger: null,
+          });
+        }
+      }
     });
 
-    return () => unsubscribe();
-  }, [chatId]);
-
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        alert('Sorry, we need camera permissions to make this work!');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-      });
-
-      if (!result.canceled) {
-        sendImageMessage(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
-  };
-
-  const sendImageMessage = async (imageUri) => {
-    const currentUser = auth.currentUser;
-    const messagesRef = ref(db, `chats/${chatId}/messages`);
-
-    const newMessage = {
-      type: 'image',
-      imageUrl: imageUri,
-      senderId: currentUser.uid,
-      senderName: currentUser.displayName || 'User',
-      timestamp: serverTimestamp(),
+    return () => {
+      unsubscribe();
+      // Clear processed messages when leaving the screen
+      processedMessageIds.current.clear();
     };
-
-    try {
-      await push(messagesRef, newMessage);
-      Keyboard.dismiss();
-    } catch (error) {
-      console.error('Error sending image message:', error);
-    }
-  };
+  }, [chatId]);
 
   const sendMessage = async () => {
     if (message.trim() === '') return;
@@ -111,11 +183,6 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  const onEmojiSelected = (emoji) => {
-    setMessage(prev => prev + emoji);
-    setShowEmojiPicker(false);
-  };
-
   const renderMessage = ({ item }) => {
     const isCurrentUser = item.senderId === auth.currentUser.uid;
 
@@ -137,20 +204,12 @@ const ChatScreen = ({ route, navigation }) => {
           styles.messageContainer,
           isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
         ]}>
-          {item.type === 'image' ? (
-            <Image
-              source={{ uri: item.imageUrl }}
-              style={styles.messageImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <Text style={[
-              styles.messageText,
-              isCurrentUser ? styles.currentUserMessageText : styles.otherUserMessageText
-            ]}>
-              {item.text}
-            </Text>
-          )}
+          <Text style={[
+            styles.messageText,
+            isCurrentUser ? styles.currentUserMessageText : styles.otherUserMessageText
+          ]}>
+            {item.text}
+          </Text>
           <Text style={[
             styles.timestamp,
             isCurrentUser ? styles.currentUserTimestamp : styles.otherUserTimestamp
@@ -166,15 +225,14 @@ const ChatScreen = ({ route, navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <TouchableOpacity 
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="chevron-back" size={28} color="#000" />
+            <Ionicons name="chevron-back" size={28} color="#fff" />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>{otherUser?.name || 'Chat'}</Text>
@@ -194,205 +252,195 @@ const ChatScreen = ({ route, navigation }) => {
         />
       </View>
 
-      {showEmojiPicker && (
-        <View style={styles.emojiPickerContainer}>
-          <EmojiSelector
-            onEmojiSelected={onEmojiSelected}
-            showSearchBar={false}
-            showHistory={true}
-            columns={8}
-            category={Categories.all}
-          />
-        </View>
-      )}
-
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         style={styles.inputWrapper}
       >
         <View style={styles.inputContainer}>
-          <TouchableOpacity 
-            style={styles.attachButton}
-            onPress={pickImage}
-          >
-            <Ionicons name="camera-outline" size={24} color="#262626" />
-          </TouchableOpacity>
           <TextInput
             style={styles.input}
             value={message}
             onChangeText={setMessage}
-            placeholder="Message..."
-            placeholderTextColor="#8e8e8e"
+            placeholder="Type a message..."
+            placeholderTextColor="#718096"
             multiline
             maxLength={500}
           />
-          {message.trim() === '' ? (
-            <TouchableOpacity 
-              style={styles.emojiButton}
-              onPress={() => setShowEmojiPicker(!showEmojiPicker)}
-            >
-              <Ionicons name="happy-outline" size={24} color="#262626" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.sendButton}
-              onPress={sendMessage}
-            >
-              <Ionicons name="send" size={20} color="#fff" />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+            onPress={sendMessage}
+            disabled={!message.trim()}
+          >
+            <Ionicons name="send" size={20} color="#fff" />
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8fafc',
   },
   header: {
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#dbdbdb',
-    backgroundColor: '#fff',
+    backgroundColor: '#00b8ff',
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+    shadowColor: '#00b8ff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    paddingTop: Platform.OS === 'ios' ? 50 : 10,
+    paddingBottom: 15,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    height: 44,
+    paddingHorizontal: 15,
   },
   backButton: {
-    padding: 5,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
   },
   headerInfo: {
     flex: 1,
-    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#262626',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.5,
   },
   chatContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8fafc',
   },
   messagesList: {
     padding: 15,
   },
   messageWrapper: {
     flexDirection: 'row',
-    marginBottom: 8,
-    alignItems: 'flex-end',
+    marginBottom: 15,
+    maxWidth: '85%',
   },
   currentUserWrapper: {
-    justifyContent: 'flex-end',
+    alignSelf: 'flex-end',
   },
   otherUserWrapper: {
-    justifyContent: 'flex-start',
+    alignSelf: 'flex-start',
   },
   avatarContainer: {
     marginRight: 8,
   },
   avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#e0e0e0',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#00b8ff',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#00b8ff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   avatarText: {
-    color: '#262626',
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   messageContainer: {
-    maxWidth: '75%',
     padding: 12,
-    borderRadius: 22,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   currentUserMessage: {
-    backgroundColor: '#0095f6',
+    backgroundColor: '#00b8ff',
     borderBottomRightRadius: 4,
   },
   otherUserMessage: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#ffffff',
     borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  messageImage: {
-    width: 200,
-    height: 200,
-    borderRadius: 12,
-    marginBottom: 4,
+    fontSize: 16,
+    lineHeight: 22,
   },
   currentUserMessageText: {
-    color: '#fff',
+    color: '#ffffff',
+    fontWeight: '500',
   },
   otherUserMessageText: {
-    color: '#262626',
+    color: '#1a202c',
+    fontWeight: '500',
   },
   timestamp: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 4,
-    alignSelf: 'flex-end',
   },
   currentUserTimestamp: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   otherUserTimestamp: {
-    color: '#8e8e8e',
+    color: '#718096',
   },
   inputWrapper: {
-    backgroundColor: '#fff',
-    borderTopWidth: 0.5,
-    borderTopColor: '#dbdbdb',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 10,
     alignItems: 'center',
-  },
-  attachButton: {
-    padding: 8,
-    marginRight: 8,
+    backgroundColor: '#f8fafc',
+    borderRadius: 25,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   input: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    marginRight: 8,
+    fontSize: 16,
+    color: '#1a202c',
     maxHeight: 100,
-    minHeight: 36,
-    fontSize: 15,
-    color: '#262626',
-  },
-  emojiButton: {
-    padding: 8,
+    paddingVertical: 8,
   },
   sendButton: {
-    backgroundColor: '#0095f6',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#00b8ff',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
+    shadowColor: '#00b8ff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  emojiPickerContainer: {
-    height: 250,
-    backgroundColor: '#fff',
-    borderTopWidth: 0.5,
-    borderTopColor: '#dbdbdb',
+  sendButtonDisabled: {
+    backgroundColor: '#cbd5e0',
+    shadowColor: '#cbd5e0',
   },
 });
 

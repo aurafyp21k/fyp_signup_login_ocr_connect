@@ -1,16 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Alert, 
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform
+} from 'react-native';
 import { auth, database } from '../firebase/config';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { ref, set } from 'firebase/database';
 import * as Location from 'expo-location';
 import { getDatabase } from 'firebase/database';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function SignupScreen({ navigation, route }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Handle returned data from CNICScannerScreen
   useEffect(() => {
@@ -116,83 +130,172 @@ export default function SignupScreen({ navigation, route }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Sign Up</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.imageContainer}>
+          <Image 
+            source={require('../assets/images/signup-car.png')} 
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          />
+          <Text style={styles.welcomeText}>Create Your Account</Text>
+        </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TouchableOpacity 
-        style={[styles.button, loading && styles.buttonDisabled]} 
-        onPress={handleSignup}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="white" />
-        ) : (
-          <Text style={styles.buttonText}>Sign Up</Text>
-        )}
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-        <Text style={styles.link}>Already have an account? Login</Text>
-      </TouchableOpacity>
-    </View>
+        <View style={styles.formContainer}>
+          <View style={styles.inputContainer}>
+            <Ionicons name="mail-outline" size={24} color="#666" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Enter email"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholderTextColor="#666"
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={24} color="#666" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Enter password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              placeholderTextColor="#666"
+            />
+            <TouchableOpacity 
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                size={24} 
+                color="#666" 
+              />
+            </TouchableOpacity>
+          </View>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          <TouchableOpacity 
+            style={[styles.button, loading && styles.buttonDisabled]} 
+            onPress={handleSignup}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.buttonText}>Sign Up</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Login')}
+            style={styles.loginLink}
+          >
+            <Text style={styles.loginText}>
+              Already have an account? <Text style={styles.loginTextBold}>Log In</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    padding: 20,
     backgroundColor: '#fff',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
+  scrollView: {
+    flex: 1,
+  },
+  imageContainer: {
+    height: 350,
+    position: 'relative',
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+  },
+  welcomeText: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    fontSize: 28,
+    fontWeight: '600',
+    color: '#000',
+  },
+  formContainer: {
+    padding: 20,
+    paddingTop: 50,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    marginBottom: 16,
+    backgroundColor: '#F8FAFC',
+  },
+  inputIcon: {
+    padding: 12,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
-    marginBottom: 15,
-    borderRadius: 5,
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#1E293B',
+  },
+  eyeIcon: {
+    padding: 12,
   },
   button: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 5,
-    marginBottom: 15,
+    backgroundColor: '#0286FF',
+    paddingVertical: 16,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginTop: 24,
+    shadowColor: '#0286FF',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   buttonText: {
     color: '#fff',
-    textAlign: 'center',
-    fontWeight: 'bold',
-  },
-  error: {
-    color: 'red',
-    marginBottom: 15,
-  },
-  link: {
-    color: '#007AFF',
-    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  error: {
+    color: '#EF4444',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  loginLink: {
+    marginTop: 24,
+    alignItems: 'center',
+  },
+  loginText: {
+    fontSize: 16,
+    color: '#64748B',
+  },
+  loginTextBold: {
+    color: '#0286FF',
+    fontWeight: '600',
   },
 });

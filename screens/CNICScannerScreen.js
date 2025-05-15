@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Image, ActivityIndicator, Alert, Platform, TextInput, ScrollView, SafeAreaView, Modal } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Image, ActivityIndicator, Alert, Platform, TextInput, ScrollView, SafeAreaView, Modal, KeyboardAvoidingView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
@@ -293,50 +293,6 @@ export default function CNICScannerScreen({ navigation, route }) {
     });
   };
 
-  const renderSkillsModal = () => (
-    <Modal
-      visible={showSkillsModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowSkillsModal(false)}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {skillCategory === 'car' ? 'Car Skills' : 'First Aid Skills'}
-            </Text>
-            <TouchableOpacity onPress={() => setShowSkillsModal(false)}>
-              <Ionicons name="close" size={24} color="#000" />
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.skillsList}>
-            {(skillCategory === 'car' ? CAR_SKILLS : FIRST_AID_SKILLS).map((skill) => (
-              <TouchableOpacity
-                key={skill}
-                style={[
-                  styles.skillItem,
-                  selectedSkills.includes(skill) && styles.selectedSkillItem
-                ]}
-                onPress={() => toggleSkill(skill)}
-              >
-                <Text style={[
-                  styles.skillText,
-                  selectedSkills.includes(skill) && styles.selectedSkillText
-                ]}>
-                  {skill}
-                </Text>
-                {selectedSkills.includes(skill) && (
-                  <Ionicons name="checkmark" size={20} color="#fff" />
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-
   const validateForm = () => {
     if (!phoneNumber.trim()) {
       Alert.alert('Error', 'Please enter your phone number');
@@ -447,305 +403,547 @@ export default function CNICScannerScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={{flex: 1, backgroundColor: '#f6f8fa'}}>
-      <StatusBar style="light" backgroundColor="#007AFF" />
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.title}>Pakistani ID Card Scanner</Text>
-          <Text style={styles.subtitle}>Required for Account Verification</Text>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={handleBack}
+          >
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>CNIC Verification</Text>
         </View>
       </View>
-      {!image ? (
-        <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
-          <TouchableOpacity style={styles.button} onPress={pickImage}>
-            <Text style={styles.buttonText}>Upload ID Card Image</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, {backgroundColor: '#34C759', marginTop: 10}]} onPress={captureImage}>
-            <Text style={styles.buttonText}>Capture ID Card Image</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView ref={scrollRef} style={{flex: 1, width: '100%'}} contentContainerStyle={{alignItems: 'center', paddingBottom: 40}}>
-          <Image source={{ uri: image }} style={styles.image} />
-          {loading ? (
-            <ActivityIndicator size="large" color="#007AFF" style={{marginVertical: 30}} />
-          ) : extractedData ? (
-            <View style={styles.card}>
-              <Text style={styles.formLabel}>Phone Number</Text>
-              <TextInput
-                style={[styles.input, phoneError ? styles.inputError : null]}
-                value={phoneNumber}
-                onChangeText={text => {
-                  setPhoneNumber(text);
-                  if (text && !validatePhoneNumber(text)) {
-                    setPhoneError('Please enter a valid Pakistani phone number (e.g., 03XX-XXXXXXX)');
-                  } else {
-                    setPhoneError('');
-                  }
-                }}
-                placeholder="03XX-XXXXXXX"
-                placeholderTextColor="#aaa"
-                keyboardType="phone-pad"
-                maxLength={12}
-              />
-              {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
 
-              <Text style={styles.formLabel}>Name</Text>
-              <TextInput
-                style={[styles.input, nameError ? styles.inputError : null]}
-                value={form.name}
-                onChangeText={text => {
-                  setForm(f => ({ ...f, name: text }));
-                }}
-                placeholder="Name"
-                placeholderTextColor="#aaa"
-              />
-              {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
-
-              <Text style={styles.formLabel}>Father/Husband Name</Text>
-              <TextInput
-                style={styles.input}
-                value={form.fatherOrHusband}
-                onChangeText={text => setForm(f => ({ ...f, fatherOrHusband: text }))}
-                placeholder="Father/Husband Name"
-                placeholderTextColor="#aaa"
-              />
-              <Text style={styles.formLabel}>CNIC</Text>
-              <TextInput
-                style={styles.input}
-                value={form.cnic}
-                onChangeText={text => setForm(f => ({ ...f, cnic: text }))}
-                placeholder="CNIC"
-                placeholderTextColor="#aaa"
-              />
-              <Text style={styles.formLabel}>Date of Birth</Text>
-              <TouchableOpacity style={styles.input} onPress={() => showDatePicker('dob')}>
-                <Text style={{color: form.dob ? '#222' : '#aaa'}}>{form.dob || 'Select Date of Birth'}</Text>
-              </TouchableOpacity>
-              <Text style={styles.formLabel}>Date of Issue</Text>
-              <TouchableOpacity style={styles.input} onPress={() => showDatePicker('doi')}>
-                <Text style={{color: form.doi ? '#222' : '#aaa'}}>{form.doi || 'Select Date of Issue'}</Text>
-              </TouchableOpacity>
-              <Text style={styles.formLabel}>Date of Expiry</Text>
-              <TouchableOpacity style={styles.input} onPress={() => showDatePicker('doe')}>
-                <Text style={{color: form.doe ? '#222' : '#aaa'}}>{form.doe || 'Select Date of Expiry'}</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.formLabel}>Skills</Text>
-              <View style={styles.skillButtonsContainer}>
-                <TouchableOpacity 
-                  style={[styles.skillCategoryButton, skillCategory === 'car' && styles.activeSkillCategoryButton]} 
-                  onPress={() => {
-                    setSkillCategory('car');
-                    setShowSkillsModal(true);
-                  }}
-                >
-                  <Text style={[styles.skillCategoryText, skillCategory === 'car' && styles.activeSkillCategoryText]}>
-                    Car Skills
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.skillCategoryButton, skillCategory === 'firstAid' && styles.activeSkillCategoryButton]} 
-                  onPress={() => {
-                    setSkillCategory('firstAid');
-                    setShowSkillsModal(true);
-                  }}
-                >
-                  <Text style={[styles.skillCategoryText, skillCategory === 'firstAid' && styles.activeSkillCategoryText]}>
-                    First Aid Skills
-                  </Text>
-                </TouchableOpacity>
+      <ScrollView 
+        style={styles.scrollView}
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.imageSection}>
+          <TouchableOpacity 
+            style={styles.imageContainer}
+            onPress={captureImage}
+          >
+            {image ? (
+              <Image source={{ uri: image }} style={styles.image} />
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Ionicons name="camera" size={40} color="#0286FF" />
+                <Text style={styles.imagePlaceholderText}>Tap to capture CNIC</Text>
               </View>
-              
-              {selectedSkills.length > 0 && (
-                <View style={styles.selectedSkillsContainer}>
-                  <Text style={styles.selectedSkillsTitle}>Selected Skills:</Text>
-                  <View style={styles.selectedSkillsList}>
-                    {selectedSkills.map((skill) => (
-                      <View key={skill} style={styles.selectedSkillTag}>
-                        <Text style={styles.selectedSkillTagText}>{skill}</Text>
-                        <TouchableOpacity onPress={() => toggleSkill(skill)}>
-                          <Ionicons name="close-circle" size={16} color="#007AFF" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
+            )}
+          </TouchableOpacity>
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity style={styles.captureButton} onPress={captureImage}>
+              <Ionicons name="camera" size={20} color="#fff" style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Capture</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
+              <Ionicons name="cloud-upload" size={20} color="#0286FF" style={styles.buttonIcon} />
+              <Text style={styles.uploadButtonText}>Upload</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
-              <TouchableOpacity 
-                style={[styles.button, { marginTop: 20 }]} 
-                onPress={saveToFirebase}
-                disabled={saving}
+        {extractedData && (
+          <View style={styles.formSection}>
+            <Text style={styles.formTitle}>Personal Information</Text>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Full Name</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="person-outline" size={24} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={form.name}
+                  onChangeText={(text) => setForm({ ...form, name: text })}
+                  placeholder="Enter your full name"
+                  placeholderTextColor="#666"
+                />
+              </View>
+              {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Father/Husband Name</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="person-outline" size={24} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={form.fatherOrHusband}
+                  onChangeText={(text) => setForm({ ...form, fatherOrHusband: text })}
+                  placeholder="Enter father/husband name"
+                  placeholderTextColor="#666"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>CNIC Number</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="card-outline" size={24} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={form.cnic}
+                  onChangeText={(text) => setForm({ ...form, cnic: text })}
+                  placeholder="Enter CNIC number"
+                  keyboardType="numeric"
+                  placeholderTextColor="#666"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Date of Birth</Text>
+              <TouchableOpacity
+                onPress={() => showDatePicker('dob')}
+                style={styles.inputWrapper}
               >
-                {saving ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text style={styles.buttonText}>Save & Continue</Text>
-                )}
+                <Ionicons name="calendar-outline" size={24} color="#666" style={styles.inputIcon} />
+                <Text style={[styles.input, { color: form.dob ? '#1a202c' : '#666' }]}>
+                  {form.dob || 'Select date of birth'}
+                </Text>
               </TouchableOpacity>
             </View>
-          ) : null}
-          <TouchableOpacity style={styles.button} onPress={() => {
-            setImage(null);
-            setExtractedData(null);
-          }}>
-            <Text style={styles.buttonText}>Upload Different Image</Text>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Date of Issue</Text>
+              <TouchableOpacity
+                onPress={() => showDatePicker('doi')}
+                style={styles.inputWrapper}
+              >
+                <Ionicons name="calendar-outline" size={24} color="#666" style={styles.inputIcon} />
+                <Text style={[styles.input, { color: form.doi ? '#1a202c' : '#666' }]}>
+                  {form.doi || 'Select date of issue'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Date of Expiry</Text>
+              <TouchableOpacity
+                onPress={() => showDatePicker('doe')}
+                style={styles.inputWrapper}
+              >
+                <Ionicons name="calendar-outline" size={24} color="#666" style={styles.inputIcon} />
+                <Text style={[styles.input, { color: form.doe ? '#1a202c' : '#666' }]}>
+                  {form.doe || 'Select date of expiry'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Phone Number</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="call-outline" size={24} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={[
+                    styles.input,
+                    phoneNumber && !validatePhoneNumber(phoneNumber) && styles.inputError
+                  ]}
+                  value={phoneNumber}
+                  onChangeText={(text) => {
+                    setPhoneNumber(text);
+                    if (text && !validatePhoneNumber(text)) {
+                      setPhoneError('Please enter a valid Pakistani phone number (e.g., 03XX-XXXXXXX)');
+                    } else {
+                      setPhoneError('');
+                    }
+                  }}
+                  placeholder="Enter your phone number"
+                  keyboardType="phone-pad"
+                  maxLength={12}
+                  placeholderTextColor="#666"
+                />
+              </View>
+              {phoneError ? (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={14} color="#e53e3e" />
+                  <Text style={styles.errorText}>{phoneError}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <TouchableOpacity 
+              style={styles.skillsButton}
+              onPress={() => setShowSkillsModal(true)}
+            >
+              <Ionicons name="construct-outline" size={20} color="#fff" style={styles.buttonIcon} />
+              <Text style={styles.skillsButtonText}>Select Skills</Text>
+            </TouchableOpacity>
+
+            {selectedSkills.length > 0 && (
+              <View style={styles.selectedSkillsContainer}>
+                {selectedSkills.map((skill) => (
+                  <View key={skill} style={styles.selectedSkill}>
+                    <Text style={styles.selectedSkillText}>{skill}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {extractedData && (
+          <TouchableOpacity 
+            style={[styles.saveButton, saving && styles.buttonDisabled]}
+            onPress={saveToFirebase}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.saveButtonText}>Save Information</Text>
+              </>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, {backgroundColor: '#34C759', marginTop: 10}]} onPress={() => {
-            setImage(null);
-            setExtractedData(null);
-          }}>
-            <Text style={styles.buttonText}>Capture Different Image</Text>
-          </TouchableOpacity>
-        </ScrollView>
+        )}
+      </ScrollView>
+
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#0286FF" />
+          <Text style={styles.loadingText}>Processing CNIC...</Text>
+        </View>
       )}
-      {renderSkillsModal()}
+
       {pickerMode && (
         <DateTimePicker
-          testID="dateTimePicker"
           value={pickerDate}
           mode="date"
-          is24Hour={true}
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          display="default"
           onChange={onDateChange}
-          style={Platform.OS === 'ios' ? { backgroundColor: 'white' } : {}}
         />
       )}
-    </SafeAreaView>
+
+      <Modal
+        visible={showSkillsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowSkillsModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Your Skills</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowSkillsModal(false)}
+              >
+                <Ionicons name="close" size={24} color="#718096" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.categoryTabs}>
+              <TouchableOpacity
+                style={[
+                  styles.categoryTab,
+                  skillCategory === 'car' && styles.activeCategoryTab
+                ]}
+                onPress={() => setSkillCategory('car')}
+              >
+                <Text style={[
+                  styles.categoryTabText,
+                  skillCategory === 'car' && styles.activeCategoryTabText
+                ]}>Car Skills</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.categoryTab,
+                  skillCategory === 'firstAid' && styles.activeCategoryTab
+                ]}
+                onPress={() => setSkillCategory('firstAid')}
+              >
+                <Text style={[
+                  styles.categoryTabText,
+                  skillCategory === 'firstAid' && styles.activeCategoryTabText
+                ]}>First Aid Skills</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 400 }}>
+              <View style={styles.skillsList}>
+                {(skillCategory === 'car' ? CAR_SKILLS : FIRST_AID_SKILLS).map((skill) => (
+                  <TouchableOpacity
+                    key={skill}
+                    style={[
+                      styles.skillItem,
+                      selectedSkills.includes(skill) && styles.selectedSkillItem
+                    ]}
+                    onPress={() => toggleSkill(skill)}
+                  >
+                    <Text style={[
+                      styles.skillText,
+                      selectedSkills.includes(skill) && styles.selectedSkillItemText
+                    ]}>{skill}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
   header: {
-    backgroundColor: '#007AFF',
-    paddingTop: 20,
+    backgroundColor: '#0286FF',
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+    shadowColor: '#0286FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    paddingTop: Platform.OS === 'ios' ? 50 : 50,
     paddingBottom: 15,
-    marginBottom: 10,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.5,
+  },
+  scrollView: {
+    flex: 1,
+    padding: 15,
+  },
+  imageSection: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 15,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 4,
-    position: 'relative',
+    elevation: 3,
   },
-  headerContent: {
+  imageContainer: {
+    width: '100%',
+    height: 200,
+    borderRadius: 15,
+    backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 15,
+  },
+  imagePlaceholder: {
+    alignItems: 'center',
+  },
+  imagePlaceholderText: {
+    color: '#718096',
+    fontSize: 16,
+    marginTop: 10,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  captureButton: {
+    flex: 1,
+    backgroundColor: '#0286FF',
+    borderRadius: 12,
+    padding: 15,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  backButton: {
-    position: 'absolute',
-    left: 15,
-    top: 50,
-    padding: 5,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    letterSpacing: 1,
-    textAlign: 'center',
-    marginBottom: 5,
-    // marginTop: 5,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.8,
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  button: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    marginVertical: 10,
-    minWidth: 200,
-    alignItems: 'center',
-    shadowColor: '#007AFF',
+    shadowColor: '#0286FF',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 4,
+  },
+  uploadButton: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#0286FF',
+  },
+  buttonIcon: {
+    marginRight: 8,
   },
   buttonText: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 16,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
+    fontWeight: '600',
   },
-  image: {
-    width: 320,
-    height: 210,
-    resizeMode: 'contain',
-    marginBottom: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    backgroundColor: '#fff',
-    marginTop: 10,
+  uploadButtonText: {
+    color: '#0286FF',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  card: {
-    width: '95%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+  formSection: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 15,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
+  formTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a202c',
     marginBottom: 15,
+  },
+  inputContainer: {
+    marginBottom: 15,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4a5568',
+    marginBottom: 8,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  inputIcon: {
+    padding: 12,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: '#f8f8f8',
-  },
-  formLabel: {
-    fontWeight: 'bold',
-    marginBottom: 5,
-    marginTop: 10,
-    color: '#007AFF',
-    fontSize: 15,
-  },
-  rawTextContainer: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 5,
-  },
-  rawTextTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  rawText: {
-    fontSize: 12,
-    color: '#666',
+    color: '#1a202c',
   },
   inputError: {
-    borderColor: '#ff3b30',
+    borderColor: '#e53e3e',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
   },
   errorText: {
-    color: '#ff3b30',
+    color: '#e53e3e',
     fontSize: 12,
-    marginTop: -10,
-    marginBottom: 10,
-    marginLeft: 5,
+    flex: 1,
+  },
+  skillsButton: {
+    backgroundColor: '#0286FF',
+    borderRadius: 12,
+    padding: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    shadowColor: '#0286FF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  skillsButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  selectedSkillsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  selectedSkill: {
+    backgroundColor: '#e6f7ff',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#0286FF',
+  },
+  selectedSkillText: {
+    color: '#0286FF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  saveButton: {
+    backgroundColor: '#0286FF',
+    borderRadius: 12,
+    padding: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    shadowColor: '#0286FF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+    marginBottom: 20,
+  },
+  saveButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#0286FF',
+    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,
@@ -753,9 +951,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
     padding: 20,
     maxHeight: '80%',
   },
@@ -767,76 +965,68 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1a202c',
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryTabs: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 4,
+  },
+  categoryTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  activeCategoryTab: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#718096',
+  },
+  activeCategoryTabText: {
+    color: '#0286FF',
   },
   skillsList: {
-    maxHeight: '80%',
-  },
-  skillItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  selectedSkillItem: {
-    backgroundColor: '#007AFF',
-  },
-  skillText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  selectedSkillText: {
-    color: '#fff',
-  },
-  skillButtonsContainer: {
-    flexDirection: 'row',
-    marginBottom: 15,
-  },
-  skillCategoryButton: {
-    flex: 1,
-    padding: 10,
-    marginHorizontal: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    alignItems: 'center',
-  },
-  activeSkillCategoryButton: {
-    backgroundColor: '#007AFF',
-  },
-  skillCategoryText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
-  },
-  activeSkillCategoryText: {
-    color: '#fff',
-  },
-  selectedSkillsContainer: {
-    marginTop: 10,
-  },
-  selectedSkillsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#007AFF',
-  },
-  selectedSkillsList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
-  selectedSkillTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E8F2FF',
-    padding: 8,
-    borderRadius: 16,
-    margin: 4,
+  skillItem: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
-  selectedSkillTagText: {
-    color: '#007AFF',
-    marginRight: 4,
+  selectedSkillItem: {
+    backgroundColor: '#e6f7ff',
+    borderColor: '#0286FF',
   },
+  skillText: {
+    fontSize: 14,
+    color: '#4a5568',
+  },
+  selectedSkillItemText: {
+    color: '#0286FF',
+  }
 }); 

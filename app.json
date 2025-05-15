@@ -4,13 +4,13 @@
     "slug": "travel_assist",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/ChatGPT_Image_May_14__2025__01_12_01_AM-removebg-preview.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/images/ChatGPT_Image_May_14__2025__01_12_01_AM-removebg-preview.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#21244F"
     },
     "ios": {
       "supportsTablet": true,
@@ -43,7 +43,7 @@
       ]
     ],
     "notification": {
-      "icon": "./assets/icon.png",
+      "icon": "./assets/icons/list.png",
       "color": "#ffffff",
       "androidMode": "default",
       "androidCollapsedTitle": "#{unread_notifications} new messages"
@@ -55,8 +55,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/ChatGPT_Image_May_14__2025__01_12_01_AM-removebg-preview.png",
+        "backgroundColor": "#00b8ff"
       },
       "config": {
         "googleMaps": {
@@ -78,7 +78,7 @@
       "useNextNotificationsApi": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/images/ChatGPT_Image_May_14__2025__01_12_01_AM-removebg-preview.png"
     }
   }
 }
